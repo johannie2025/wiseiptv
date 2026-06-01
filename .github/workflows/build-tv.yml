@@ -49,14 +49,13 @@ jobs:
           PROPS="gradle/wrapper/gradle-wrapper.properties"
           if [ ! -f "$PROPS" ]; then
             cat > "$PROPS" <<'PROPSEOF'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          PROPSEOF
+            distributionBase=GRADLE_USER_HOME
+            distributionPath=wrapper/dists
+            distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
+            zipStoreBase=GRADLE_USER_HOME
+            zipStorePath=wrapper/dists
+            PROPSEOF
           fi
-
       # ─── Build Debug avec logs complets ─────────────────────────
       - name: Build TV Debug APK
         run: |
