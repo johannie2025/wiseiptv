@@ -1,0 +1,189 @@
+name: Build Wise IPTV — Mobile APK
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-mobile:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Download gradle-wrapper.jar
+        run: |
+          GRADLE_VERSION=8.6
+          mkdir -p gradle/wrapper
+          curl -sSfL "https://raw.githubusercontent.com/gradle/gradle/v${GRADLE_VERSION}.0/gradle/wrapper/gradle-wrapper.jar" \
+               -o gradle/wrapper/gradle-wrapper.jar
+          chmod +x gradlew
+
+      - name: Ensure gradle-wrapper.properties
+        run: |
+          PROPS="gradle/wrapper/gradle-wrapper.properties"
+          if [ ! -f "$PROPS" ]; then
+            cat > "$PROPS" <<'PROPSEOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          PROPSEOF
+          fi
+
+      # ─── Build Debug avec logs complets ─────────────────────────
+ # ─── Build Debug avec logs complets ─────────────────────────
+      - name: Build Mobile Debug APK
+        run: |
+          # Active l'option 'pipefail' pour que le script échoue si Gradle échoue, malgré l'usage de 'tee'
+          set -o pipefail
+          
+          echo "🔨 Lancement de la compilation Gradle..."
+          
+          ./gradlew :mobile:assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --info \
+            2>&1 | tee build-mobile-debug.log
+
+          # Récupérer le code de sortie (0 = succès, autre = échec)
+          GRADLE_EXIT_CODE=$?
+
+          if [ $GRADLE_EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "════════════════════════════════════════════════════════════"
+            echo "❌ LE BUILD A ÉCHOUÉ ! ANALYSE DES COMPOSANTS EN ERREUR :"
+            echo "════════════════════════════════════════════════════════════"
+            echo ""
+            
+            # Recherche ciblée mais contextuelle de l'erreur
+            # Affiche la ligne d'échec et les 20 lignes qui la précèdent/suivent pour avoir le fichier exact
+            grep -B 15 -A 5 "ResourceDirectoryParseException\|SAXParseException\|Compilation failed\|Exception" build-mobile-debug.log || true
+            
+            echo ""
+            echo "🔍 [LOG EXTRA] Dernières lignes avant l'arrêt :"
+            tail -n 80 build-mobile-debug.log
+            
+            # On force le script GitHub Actions à s'arrêter en échec
+            exit $GRADLE_EXIT_CODE
+          else
+            echo "✅ Build réussi avec succès !"
+          
+      # ─── Afficher le rapport d'erreurs si le build échoue ───────
+      - name: Show error report on failure
+        if: failure()
+        run: |
+          echo "════════════ RAPPORT D'ERREURS COMPLET ════════════"
+          grep -E "(error:|Error:|FAILED|Exception|Caused by:|\.java:[0-9]+)" build-mobile-debug.log \
+            | head -200
+          echo ""
+          echo "════════════ 50 DERNIÈRES LIGNES DU LOG ════════════"
+          tail -50 build-mobile-debug.log
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-mobile-error-log-${{ github.run_number }}
+          path: build-mobile-debug.log
+          retention-days: 7
+
+      # ─── Build Release signé ─────────────────────────────────────
+      - name: Sign & Build Mobile Release APK
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEY_ALIAS:      ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD:   ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > mobile/keystore.jks
+          ./gradlew :mobile:assembleRelease \
+            --no-daemon \
+            --stacktrace \
+            --info \
+            -Pandroid.injected.signing.store.file=mobile/keystore.jks \
+            -Pandroid.injected.signing.store.password=$STORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD \
+            2>&1 | tee build-mobile-release.log
+          rm -f mobile/keystore.jks
+          grep -q "BUILD SUCCESSFUL" build-mobile-release.log || exit 1
+
+      - name: Show release error on failure
+        if: failure()
+        run: |
+          grep -E "(error:|Error:|FAILED|Exception|Caused by:|\.java:[0-9]+)" build-mobile-release.log 2>/dev/null | head -100 || true
+
+      - name: Rename Mobile APKs
+        run: |
+          TAG="${{ github.ref_name }}"
+          DEBUG=$(find mobile/build/outputs/apk/debug   -name '*.apk' 2>/dev/null | head -1)
+          RELEASE=$(find mobile/build/outputs/apk/release -name '*.apk' 2>/dev/null | head -1)
+          [ -f "$DEBUG" ]   && cp "$DEBUG"   "WiseIPTV-Mobile-${TAG}-debug.apk"   || true
+          [ -f "$RELEASE" ] && cp "$RELEASE" "WiseIPTV-Mobile-${TAG}-release.apk" || true
+          ls -lh WiseIPTV-Mobile-*.apk || echo "Aucun APK trouvé"
+
+      - name: Upload Mobile APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiseIPTV-Mobile-${{ github.ref_name }}
+          path: 'WiseIPTV-Mobile-*.apk'
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Create GitHub Release — Mobile
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 'WiseIPTV-Mobile-*.apk'
+          body: |
+            ## Wise IPTV Mobile ${{ github.ref_name }}
+            **APK Phone / Tablette Android**
+            W Design — +240 555 445 514
+
+            | Fichier | Usage |
+            |---|---|
+            | `*-debug.apk` | Tests & développement |
+            | `*-release.apk` | Production (keystore requis) |
+
+            ### Installation
+            ```bash
+            adb install WiseIPTV-Mobile-${{ github.ref_name }}-debug.apk
+            ```
+
+            ### Secrets GitHub requis pour build release
+            | Secret | Description |
+            |---|---|
+            | `ANDROID_KEYSTORE_BASE64` | Keystore encodé en base64 |
+            | `ANDROID_KEY_ALIAS` | Alias de la clé |
+            | `ANDROID_KEY_PASSWORD` | Mot de passe de la clé |
+            | `ANDROID_STORE_PASSWORD` | Mot de passe du keystore |
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ 

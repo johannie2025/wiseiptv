@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <SearchView android:id="@+id/search_view"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:iconifiedByDefault="false" android:queryHint="Rechercher…"/>
+
+    <com.google.android.material.tabs.TabLayout
+        android:id="@+id/tab_layout"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        app:tabMode="scrollable"/>
+
+    <!-- Spinner groupes/pays/langue (visible uniquement sur Live/Films/Séries) -->
+    <Spinner android:id="@+id/spinner_group"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:visibility="gone" android:padding="4dp"/>
+
+    <ProgressBar android:id="@+id/progress_bar"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="center" android:visibility="gone"/>
+
+    <TextView android:id="@+id/tv_empty"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center" android:padding="32dp"
+        android:text="Aucune chaîne. Ajoutez une playlist." android:visibility="gone"/>
+
+    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_channels"
+        android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_nav"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        app:menu="@menu/bottom_nav_menu"/>
+</LinearLayout>
