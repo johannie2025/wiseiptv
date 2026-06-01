@@ -58,7 +58,7 @@ jobs:
           fi
 
       - name: Build Debug APK
-        run: ./gradlew :tv:assembleDebug
+        run: ./gradlew :tv:assembleDebug --stacktrace --info
 
       - name: Build Release APK
         if: env.KEYSTORE_BASE64 != ''
