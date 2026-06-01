@@ -1,6 +1,6 @@
 name: Build Wise IPTV — TV APK
 
-    on:
+on:
     push:
     tags: ['v*']
     branches: [main]
