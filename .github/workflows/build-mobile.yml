@@ -48,7 +48,7 @@ jobs:
         run: |
           PROPS="gradle/wrapper/gradle-wrapper.properties"
           if [ ! -f "$PROPS" ]; then
-          cat > "$PROPS" <<'PROPSEOF'
+           cat > "$PROPS" <<'PROPSEOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
           distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
