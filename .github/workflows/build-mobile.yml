@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  build-mobile:
+    build-mobile:
     runs-on: ubuntu-latest
     env:
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
