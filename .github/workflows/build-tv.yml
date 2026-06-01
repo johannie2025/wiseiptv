@@ -1,18 +1,18 @@
 name: Build Wise IPTV — TV APK
 
 on:
-    push:
+  push:
     tags: ['v*']
     branches: [main]
-    pull_request:
+  pull_request:
     branches: [main]
-    workflow_dispatch:
+  workflow_dispatch:
 
-    permissions:
-    contents: write
+permissions:
+  contents: write
 
-    jobs:
-    build-tv:
+jobs:
+  build-tv:
     runs-on: ubuntu-latest
     env:
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -49,79 +49,34 @@ on:
           PROPS="gradle/wrapper/gradle-wrapper.properties"
           if [ ! -f "$PROPS" ]; then
             cat > "$PROPS" <<'PROPSEOF'
-            distributionBase=GRADLE_USER_HOME
-            distributionPath=wrapper/dists
-            distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
-            zipStoreBase=GRADLE_USER_HOME
-            zipStorePath=wrapper/dists
-            PROPSEOF
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.6-bin.zip
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+PROPSEOF
           fi
-      # ─── Build Debug avec logs complets ─────────────────────────
-      - name: Build TV Debug APK
-        run: |
-          ./gradlew :tv:assembleDebug \
-            --no-daemon \
-            --stacktrace \
-            --info \
-            2>&1 | tee build-tv-debug.log
-          echo "════════════ ERREURS DE COMPILATION ════════════"
-          grep -E "^(e:|error:|FAILED|Exception|Caused by:|> Task|BUILD)" build-tv-debug.log \
-            | grep -v "^> Task :.*UP-TO-DATE" \
-            | grep -v "^> Task :.*SKIPPED" \
-            | head -100 || echo "Aucune erreur détectée"
-          echo "═════════════════════════════════════════════════"
-          grep -q "BUILD SUCCESSFUL" build-tv-debug.log || exit 1
 
-      - name: Show error report on failure
-        if: failure()
-        run: |
-          echo "════════════ RAPPORT D'ERREURS COMPLET ════════════"
-          grep -E "(error:|Error:|FAILED|Exception|Caused by:|\.java:[0-9]+)" build-tv-debug.log \
-            | head -200
-          echo ""
-          echo "════════════ 50 DERNIÈRES LIGNES DU LOG ════════════"
-          tail -50 build-tv-debug.log
+      - name: Build Debug APK
+        run: ./gradlew :tv:assembleDebug
 
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-tv-error-log-${{ github.run_number }}
-          path: build-tv-debug.log
-          retention-days: 7
-
-      # ─── Build Release signé ─────────────────────────────────────
-      - name: Sign & Build TV Release APK
+      - name: Build Release APK
         if: env.KEYSTORE_BASE64 != ''
-        env:
-          KEY_ALIAS:      ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD:   ${{ secrets.ANDROID_KEY_PASSWORD }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > tv/keystore.jks
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > release.keystore
           ./gradlew :tv:assembleRelease \
-            --no-daemon \
-            --stacktrace \
-            --info \
-            -Pandroid.injected.signing.store.file=tv/keystore.jks \
-            -Pandroid.injected.signing.store.password=$STORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$KEY_PASSWORD \
-            2>&1 | tee build-tv-release.log
-          rm -f tv/keystore.jks
-          grep -q "BUILD SUCCESSFUL" build-tv-release.log || exit 1
+            -Pandroid.injected.signing.store.file=$(pwd)/release.keystore \
+            -Pandroid.injected.signing.store.password="${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            -Pandroid.injected.signing.key.alias="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -Pandroid.injected.signing.key.password="${{ secrets.ANDROID_KEY_PASSWORD }}"
 
-      - name: Show release error on failure
-        if: failure()
-        run: |
-          grep -E "(error:|Error:|FAILED|Exception|Caused by:|\.java:[0-9]+)" build-tv-release.log 2>/dev/null | head -100 || true
-
-      - name: Rename TV APKs
+      - name: Prepare APK Artifacts
         run: |
           TAG="${{ github.ref_name }}"
-          DEBUG=$(find tv/build/outputs/apk/debug   -name '*.apk' 2>/dev/null | head -1)
-          RELEASE=$(find tv/build/outputs/apk/release -name '*.apk' 2>/dev/null | head -1)
-          [ -f "$DEBUG" ]   && cp "$DEBUG"   "WiseIPTV-TV-${TAG}-debug.apk"   || true
+          [ -z "$TAG" ] && TAG="latest"
+          DEBUG="tv/build/outputs/apk/debug/tv-debug.apk"
+          RELEASE="tv/build/outputs/apk/release/tv-release.apk"
+          [ -f "$DEBUG" ] && cp "$DEBUG" "WiseIPTV-TV-${TAG}-debug.apk" || true
           [ -f "$RELEASE" ] && cp "$RELEASE" "WiseIPTV-TV-${TAG}-release.apk" || true
           ls -lh WiseIPTV-TV-*.apk || echo "Aucun APK trouvé"
 
@@ -153,13 +108,3 @@ on:
             adb connect 192.168.1.XXX:5555
             adb install WiseIPTV-TV-${{ github.ref_name }}-debug.apk
             ```
-
-            ### Secrets GitHub requis
-            | Secret | Description |
-            |---|---|
-            | `ANDROID_KEYSTORE_BASE64` | Keystore encodé en base64 |
-            | `ANDROID_KEY_ALIAS` | Alias de la clé |
-            | `ANDROID_KEY_PASSWORD` | Mot de passe de la clé |
-            | `ANDROID_STORE_PASSWORD` | Mot de passe du keystore |
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
