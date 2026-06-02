@@ -6,13 +6,12 @@ import android.util.Log;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
-import java.util.concurrent.CountDownLatch;
+import java.util.List;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 /**
  * ActivationManager — Gère le cycle de vie de l'activation :
- * Télécharge toutes les chaînes depuis TOUS les DNS reçus en arrière-plan.
+ * Télécharge toutes les chaînes depuis TOUS les DNS de manière séquentielle asynchrone.
  */
 public class ActivationManager {
     private static final String TAG = "ActivationManager";
@@ -37,7 +36,6 @@ public class ActivationManager {
                 @Override 
                 public void onActive(DeviceSecurity.ActivationResult r) {
                     saveActivationPrefs(ctx, r);
-                    // Exécution en tâche de fond
                     downloadAllPlaylistsAsync(ctx, db, r, new OnDownloadCallback() {
                         @Override
                         public void onSuccess() {
@@ -65,84 +63,89 @@ public class ActivationManager {
     }
 
     /**
-     * Méthode asynchrone globale pour exécuter le téléchargement sur un thread dédié
+     * Déclenche le processus de téléchargement séquentiel
      */
     public static void downloadAllPlaylistsAsync(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r, OnDownloadCallback callback) {
-        Executors.newSingleThreadExecutor().execute(() -> {
-            try {
-                upsertActivationPlaylist(ctx, db, r);
-                callback.onSuccess();
-            } catch (Exception e) {
-                Log.e(TAG, "Erreur lors du téléchargement : " + e.getMessage());
-                callback.onFailure(e.getMessage());
-            }
-        });
+        if (r.dnsServers == null || r.dnsServers.isEmpty()) {
+            Log.e(TAG, "Aucun DNS reçu du serveur d'activation.");
+            callback.onFailure("Aucun serveur de chaînes configuré.");
+            return;
+        }
+        
+        // Lance le téléchargement à partir de l'index 0
+        downloadDnsStep(ctx, db, r, 0, callback);
     }
 
     /**
-     * Parcourt et configure chaque serveur DNS activé (méthode bloquante interne exécutée hors de l'UI thread)
+     * Télécharge un DNS spécifique puis s'appelle lui-même pour le suivant (Récursion asynchrone)
      */
-    private static void upsertActivationPlaylist(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) throws Exception {
-        if (r.dnsServers == null || r.dnsServers.isEmpty()) {
-            Log.e(TAG, "Aucun DNS reçu du serveur d'activation.");
+    private static void downloadDnsStep(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r, int index, OnDownloadCallback callback) {
+        List<DeviceSecurity.DnsEntry> list = r.dnsServers;
+        
+        // Condition de fin : si on a traité tous les DNS
+        if (index >= list.size()) {
+            SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            long firstPid = prefs.getLong("playlist_id_dns_0", -1);
+            if (firstPid > 0) {
+                prefs.edit().putLong("playlist_id", firstPid).apply();
+            }
+            callback.onSuccess();
             return;
         }
 
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        DeviceSecurity.DnsEntry dns = list.get(index);
+        
+        // Exécution des opérations de base de données hors du thread principal
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+                String prefKey = "playlist_id_dns_" + index;
+                long existingId = prefs.getLong(prefKey, -1);
 
-        // Boucle sur l'intégralité des serveurs affectés au terminal
-        for (int i = 0; i < r.dnsServers.size(); i++) {
-            DeviceSecurity.DnsEntry dns = r.dnsServers.get(i);
-            String prefKey = "playlist_id_dns_" + i;
-            long existingId = prefs.getLong(prefKey, -1);
-
-            PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
-            if (pl == null) {
-                pl = new PlaylistEntity();
-            }
-
-            pl.name         = "Abonnement - Serveur " + (i + 1);
-            pl.type         = PlaylistEntity.TYPE_XTREAM;
-            pl.url          = dns.url;
-            pl.username     = r.login;
-            pl.password     = r.password;
-            pl.isActive     = true;
-            pl.lastUpdated  = 0; // Force le rechargement complet
-
-            if (pl.id == 0) {
-                pl.id = db.playlistDao().insert(pl);
-                prefs.edit().putLong(prefKey, pl.id).apply();
-            } else {
-                db.playlistDao().update(pl);
-            }
-
-            Log.d(TAG, "Lancement du téléchargement en tâche de fond pour : " + dns.url);
-            
-            CountDownLatch latch = new CountDownLatch(1);
-            
-            // Lancement du loader natif
-            PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
-                @Override 
-                public void onDone(int count) {
-                    Log.d(TAG, "Serveur " + (dns.url) + " : " + count + " chaînes téléchargées.");
-                    latch.countDown();
+                PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
+                if (pl == null) {
+                    pl = new PlaylistEntity();
                 }
+
+                pl.name         = "Abonnement - Serveur " + (index + 1);
+                pl.type         = PlaylistEntity.TYPE_XTREAM;
+                pl.url          = dns.url;
+                pl.username     = r.login;
+                pl.password     = r.password;
+                pl.isActive     = true;
+                pl.lastUpdated  = 0; // Force le PlaylistLoader à tout synchroniser
+
+                if (pl.id == 0) {
+                    pl.id = db.playlistDao().insert(pl);
+                    prefs.edit().putLong(prefKey, pl.id).apply();
+                } else {
+                    db.playlistDao().update(pl);
+                }
+
+                Log.d(TAG, "Téléchargement en cours pour le serveur [" + index + "] : " + dns.url);
                 
-                @Override 
-                public void onError(String msg) {
-                    Log.e(TAG, "Erreur sur le serveur " + (dns.url) + " : " + msg);
-                    latch.countDown();
-                }
-            });
+                // Appel du chargeur de chaînes
+                PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
+                    @Override 
+                    public void onDone(int count) {
+                        Log.d(TAG, "Serveur [" + index + "] terminé : " + count + " chaînes.");
+                        // Succès : Passage immédiat au DNS suivant
+                        downloadDnsStep(ctx, db, r, index + 1, callback);
+                    }
+                    
+                    @Override 
+                    public void onError(String msg) {
+                        Log.e(TAG, "Erreur sur le serveur [" + index + "] : " + msg);
+                        // Même en cas d'erreur sur un serveur, on continue sur les suivants
+                        downloadDnsStep(ctx, db, r, index + 1, callback);
+                    }
+                });
 
-            // Attend la fin du téléchargement réel du serveur (max 60 secondes) avant le DNS suivant
-            latch.await(60, TimeUnit.SECONDS);
-        }
-
-        long firstPid = prefs.getLong("playlist_id_dns_0", -1);
-        if (firstPid > 0) {
-            prefs.edit().putLong("playlist_id", firstPid).apply();
-        }
+            } catch (Exception e) {
+                Log.e(TAG, "Erreur fatale BDD à l'index " + index + " : " + e.getMessage());
+                downloadDnsStep(ctx, db, r, index + 1, callback);
+            }
+        });
     }
 
     private static void purgeActivationPlaylists(Context ctx, AppDatabase db) {

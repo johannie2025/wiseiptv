@@ -177,7 +177,7 @@ public class ActivationActivity extends AppCompatActivity {
 private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boolean redirectOnSuccess) {
         AppDatabase db = AppDatabase.get(this);
         
-        // Exécute proprement le téléchargement de TOUS les DNS sans bloquer le fil principal de l'APK
+        // Appel de la structure asynchrone récursive
         ActivationManager.downloadAllPlaylistsAsync(this, db, r, new ActivationManager.OnDownloadCallback() {
             @Override
             public void onSuccess() {
@@ -193,8 +193,8 @@ private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boole
             public void onFailure(String msg) {
                 runOnUiThread(() -> {
                     setLoading(false, "");
-                    Toast.makeText(ActivationActivity.this, "Note: Erreur sur certains flux, accès accordé.", Toast.LENGTH_SHORT).show();
                     if (redirectOnSuccess) {
+                        // En cas de problème de téléchargement global, on laisse quand même entrer
                         goToMain();
                     }
                 });
