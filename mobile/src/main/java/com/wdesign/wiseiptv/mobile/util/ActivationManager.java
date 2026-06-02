@@ -12,9 +12,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * ActivationManager — Gère le cycle de vie de l'activation :
- * 1. Au démarrage : interroge le panel si la playlist est de type ACTIVATION
- * 2. Si ACTIVE → télécharge toutes les chaînes depuis TOUS les DNS reçus
- * 3. Si EXPIRED/DISABLED → supprime les playlists d'activation et coupe l'accès
+ * Télécharge toutes les chaînes depuis TOUS les DNS reçus en arrière-plan.
  */
 public class ActivationManager {
     private static final String TAG = "ActivationManager";
@@ -26,6 +24,11 @@ public class ActivationManager {
         void onError(String msg);
     }
 
+    public interface OnDownloadCallback {
+        void onSuccess();
+        void onFailure(String msg);
+    }
+
     /** À appeler au démarrage de l'app (WiseApp.onCreate) */
     public static void checkAndSync(Context ctx, OnResult cb) {
         AppDatabase db = AppDatabase.get(ctx);
@@ -33,14 +36,18 @@ public class ActivationManager {
             DeviceSecurity.check(ctx, new DeviceSecurity.Callback() {
                 @Override 
                 public void onActive(DeviceSecurity.ActivationResult r) {
-                    try {
-                        saveActivationPrefs(ctx, r);
-                        upsertActivationPlaylist(ctx, db, r);
-                        cb.onActivated(r);
-                    } catch (Exception e) {
-                        Log.e(TAG, "Erreur lors de la synchronisation : " + e.getMessage());
-                        cb.onError(e.getMessage());
-                    }
+                    saveActivationPrefs(ctx, r);
+                    // Exécution en tâche de fond
+                    downloadAllPlaylistsAsync(ctx, db, r, new OnDownloadCallback() {
+                        @Override
+                        public void onSuccess() {
+                            cb.onActivated(r);
+                        }
+                        @Override
+                        public void onFailure(String msg) {
+                            cb.onError(msg);
+                        }
+                    });
                 }
                 
                 @Override 
@@ -51,7 +58,6 @@ public class ActivationManager {
                 
                 @Override 
                 public void onError(String message) {
-                    // Pas de réseau → on garde les playlists existantes (mode offline)
                     cb.onError(message);
                 }
             });
@@ -59,10 +65,24 @@ public class ActivationManager {
     }
 
     /**
-     * Parcourt et configure chaque serveur DNS activé pour l'appareil,
-     * puis télécharge et enregistre de manière bloquante toutes les chaînes associées.
+     * Méthode asynchrone globale pour exécuter le téléchargement sur un thread dédié
      */
-    public static void upsertActivationPlaylist(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) throws Exception {
+    public static void downloadAllPlaylistsAsync(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r, OnDownloadCallback callback) {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                upsertActivationPlaylist(ctx, db, r);
+                callback.onSuccess();
+            } catch (Exception e) {
+                Log.e(TAG, "Erreur lors du téléchargement : " + e.getMessage());
+                callback.onFailure(e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Parcourt et configure chaque serveur DNS activé (méthode bloquante interne exécutée hors de l'UI thread)
+     */
+    private static void upsertActivationPlaylist(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) throws Exception {
         if (r.dnsServers == null || r.dnsServers.isEmpty()) {
             Log.e(TAG, "Aucun DNS reçu du serveur d'activation.");
             return;
@@ -87,7 +107,7 @@ public class ActivationManager {
             pl.username     = r.login;
             pl.password     = r.password;
             pl.isActive     = true;
-            pl.lastUpdated  = 0; // Force le PlaylistLoader à recharger à zéro les chaînes
+            pl.lastUpdated  = 0; // Force le rechargement complet
 
             if (pl.id == 0) {
                 pl.id = db.playlistDao().insert(pl);
@@ -96,15 +116,15 @@ public class ActivationManager {
                 db.playlistDao().update(pl);
             }
 
-            Log.d(TAG, "Lancement du téléchargement des chaînes pour : " + dns.url);
+            Log.d(TAG, "Lancement du téléchargement en tâche de fond pour : " + dns.url);
             
-            // Verrou pour forcer le téléchargement complet du DNS courant avant de passer au suivant
             CountDownLatch latch = new CountDownLatch(1);
             
+            // Lancement du loader natif
             PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
                 @Override 
                 public void onDone(int count) {
-                    Log.d(TAG, "Serveur " + (dns.url) + " : " + count + " chaînes synchronisées.");
+                    Log.d(TAG, "Serveur " + (dns.url) + " : " + count + " chaînes téléchargées.");
                     latch.countDown();
                 }
                 
@@ -115,11 +135,10 @@ public class ActivationManager {
                 }
             });
 
-            // Attend jusqu'à 45 secondes la fin du téléchargement effectif des flux pour ce serveur
-            latch.await(45, TimeUnit.SECONDS);
+            // Attend la fin du téléchargement réel du serveur (max 60 secondes) avant le DNS suivant
+            latch.await(60, TimeUnit.SECONDS);
         }
 
-        // On conserve le stockage du premier playlist_id pour la rétrocompatibilité si nécessaire
         long firstPid = prefs.getLong("playlist_id_dns_0", -1);
         if (firstPid > 0) {
             prefs.edit().putLong("playlist_id", firstPid).apply();
@@ -128,8 +147,6 @@ public class ActivationManager {
 
     private static void purgeActivationPlaylists(Context ctx, AppDatabase db) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        
-        // Purge dynamique de tous les DNS potentiels stockés en cache local
         for (int i = 0; i < 20; i++) {
             String prefKey = "playlist_id_dns_" + i;
             long pid = prefs.getLong(prefKey, -1);
@@ -140,8 +157,6 @@ public class ActivationManager {
                 prefs.edit().remove(prefKey).apply();
             }
         }
-
-        // Purge de l'ancienne clé racine par sécurité
         long oldPid = prefs.getLong("playlist_id", -1);
         if (oldPid > 0) {
             db.channelDao().deleteByPlaylist(oldPid);
@@ -149,7 +164,6 @@ public class ActivationManager {
             if (pl != null) db.playlistDao().delete(pl);
             prefs.edit().remove("playlist_id").apply();
         }
-        
         prefs.edit().remove("status").remove("expires_at").remove("login").apply();
     }
 

@@ -174,37 +174,32 @@ public class ActivationActivity extends AppCompatActivity {
     /**
      * Gère le téléchargement de manière sécurisée et n'ouvre l'application que si tout est prêt localement.
      */
-    private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boolean redirectOnSuccess) {
+private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boolean redirectOnSuccess) {
         AppDatabase db = AppDatabase.get(this);
         
-        // Exécution forcée dans un thread séparé pour ne pas bloquer l'UI, mais gérée de bout en bout
-        new Thread(() -> {
-            try {
-                // Étape 1 : Enregistrement ou mise à jour dans la base SQLite locale
-                ActivationManager.upsertActivationPlaylist(ActivationActivity.this, db, r);
-                
-                // On laisse un léger répit au système de base de données pour valider le commit de la transaction Room
-                Thread.sleep(600); 
-
-                if (redirectOnSuccess) {
-                    runOnUiThread(() -> {
-                        setLoading(false, "");
-                        goToMain();
-                    });
-                } else {
-                    runOnUiThread(() -> setLoading(false, ""));
-                }
-            } catch (Exception e) {
-                android.util.Log.e("ActivationActivity", "Erreur lors du traitement de la playlist : " + e.getMessage());
+        // Exécute proprement le téléchargement de TOUS les DNS sans bloquer le fil principal de l'APK
+        ActivationManager.downloadAllPlaylistsAsync(this, db, r, new ActivationManager.OnDownloadCallback() {
+            @Override
+            public void onSuccess() {
                 runOnUiThread(() -> {
                     setLoading(false, "");
                     if (redirectOnSuccess) {
-                        // Même en cas d'anomalie mineure, on permet l'accès à l'application principale
                         goToMain();
                     }
                 });
             }
-        }).start();
+
+            @Override
+            public void onFailure(String msg) {
+                runOnUiThread(() -> {
+                    setLoading(false, "");
+                    Toast.makeText(ActivationActivity.this, "Note: Erreur sur certains flux, accès accordé.", Toast.LENGTH_SHORT).show();
+                    if (redirectOnSuccess) {
+                        goToMain();
+                    }
+                });
+            }
+        });
     }
 
     private boolean isExpired(String dateStr) {
