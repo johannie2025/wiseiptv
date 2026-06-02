@@ -63,7 +63,7 @@ private static void upsertActivationPlaylist(Context ctx, AppDatabase db, Device
         pl.type = 2; // Type Xtream / API
         
         // 🛠️ CORRECTION : Utilisation de pl.server (conforme à votre PlaylistEntity)
-        pl.server = r.primaryDns(); 
+        pl.serverUrl = r.primaryDns(); 
         
         pl.username = r.login;
         pl.password = r.password;
