@@ -18,14 +18,15 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * ActivationActivity — PREMIER ÉCRAN de l'APK Mobile (Corrigé avec les ID exacts du layout).
+ * ActivationActivity — PREMIER ÉCRAN de l'APK Mobile.
+ * Optimisé : Pas de réaffichage inutile et téléchargement automatique en arrière-plan.
  */
 public class ActivationActivity extends AppCompatActivity {
 
     private TextView  tvDeviceKey, tvStatus, tvStatusDetail;
-    private TextView  tvProvider, tvLogin, tvPassword, tvExpiry;
+    private TextView  tvProviderLabel, tvLogin, tvPassword, tvExpiry;
     private View      cardProvider;
-    private Button    btnCheck, btnAccess;
+    private Button    btnCheck, btnAccess, btnCopy;
     private ProgressBar progressBar;
     private String    deviceKey;
 
@@ -34,59 +35,59 @@ public class ActivationActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Utilisation du layout mobile d'origine
-        setContentView(R.layout.activity_activation_mobile); 
+        setContentView(R.layout.activity_activation); // 🛠️ ID RESTAURÉ[cite: 5]
 
-        // 🛠️ CORRECTION DES ID : Alignement strict sur les composants réels de votre layout mobile
-        tvDeviceKey    = findViewById(R.id.txt_key);          // Réaligné
-        tvStatus       = findViewById(R.id.txt_status);       // Réaligné
-        tvStatusDetail = findViewById(R.id.txt_status_desc);  // Réaligné
-        tvProvider     = findViewById(R.id.txt_provider);     // Réaligné
-        tvLogin        = findViewById(R.id.txt_login);        // Réaligné
-        tvPassword     = findViewById(R.id.txt_password);     // Réaligné
-        tvExpiry       = findViewById(R.id.txt_expiry);       // Réaligné
-        cardProvider   = findViewById(R.id.layout_details);   // Réaligné
-        btnCheck       = findViewById(R.id.btn_check);        // Réaligné
-        btnAccess      = findViewById(R.id.btn_access);       // Réaligné
-        progressBar    = findViewById(R.id.progress_loading); // Réaligné
+        // 🛠️ COMPOSANTS ET IDENTIFIANTS RESTAURÉS À LEUR ÉTAT D'ORIGINE STRICT[cite: 5]
+        tvDeviceKey    = findViewById(R.id.tv_device_key);[cite: 5]
+        tvStatus       = findViewById(R.id.tv_status);[cite: 5]
+        tvStatusDetail = findViewById(R.id.tv_status_detail);[cite: 5]
+        tvProviderLabel= findViewById(R.id.tv_provider_label);[cite: 5]
+        tvLogin        = findViewById(R.id.tv_login);[cite: 5]
+        tvPassword     = findViewById(R.id.tv_password);[cite: 5]
+        tvExpiry       = findViewById(R.id.tv_expiry);[cite: 5]
+        cardProvider   = findViewById(R.id.card_provider);[cite: 5]
+        btnCheck       = findViewById(R.id.btn_check);[cite: 5]
+        btnAccess      = findViewById(R.id.btn_access);[cite: 5]
+        btnCopy        = findViewById(R.id.btn_copy_key);[cite: 5]
+        progressBar    = findViewById(R.id.progress_bar);[cite: 5]
 
-        // Récupération ou génération de la clé courte à 6 caractères
-        deviceKey = DeviceSecurity.getOrCreateKey(this);
+        // Récupération et affichage de la clé courte à 6 caractères
+        deviceKey = DeviceSecurity.getOrCreateKey(this);[cite: 5]
         if (tvDeviceKey != null) {
-            tvDeviceKey.setText(deviceKey);
+            tvDeviceKey.setText(deviceKey);[cite: 5]
         }
 
-        // Clic pour copier le code (Réaligné sur btn_copy)
-        View btnCopy = findViewById(R.id.btn_copy);
+        // Copie de la clé dans le presse-papier[cite: 5]
         if (btnCopy != null) {
             btnCopy.setOnClickListener(v -> {
-                ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                if (cb != null) {
-                    cb.setPrimaryClip(ClipData.newPlainText("Device Key", deviceKey));
-                    Toast.makeText(this, "Code copié !", Toast.LENGTH_SHORT).show();
+                ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);[cite: 5]
+                if (cm != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText("device_key", deviceKey));[cite: 5]
+                    Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();[cite: 5]
                 }
             });
         }
 
-        // ─── OPTIMISATION 1 : VÉRIFICATION LOCALE DIRECTE AU DÉMARRAGE ───
+        // ─── OPTIMISATION 1 : VÉRIFICATION DU CACHE AU DÉMARRAGE ───
         SharedPreferences prefs = getSharedPreferences(PREFS_ACTIVATION, Context.MODE_PRIVATE);
         String savedStatus = prefs.getString("status", "INACTIVE");
         String expiresAt   = prefs.getString("expires_at", "");
 
         if ("ACTIVE".equals(savedStatus) && !isExpired(expiresAt)) {
+            // Déjà actif et valide -> On saute directement l'écran
             goToMain();
             return;
         }
 
-        // Lancer une vérification réseau silencieuse au démarrage
+        // Lance une vérification réseau silencieuse en arrière-plan au démarrage
         autoCheckSilently();
 
-        // Événements des boutons
+        // Événements des boutons principaux
         if (btnCheck != null) {
-            btnCheck.setOnClickListener(v -> checkActivation(false));
+            btnCheck.setOnClickListener(v -> checkActivation(false));[cite: 5]
         }
         if (btnAccess != null) {
-            btnAccess.setOnClickListener(v -> checkActivation(true));
+            btnAccess.setOnClickListener(v -> checkActivation(true));[cite: 5]
         }
     }
 
@@ -99,6 +100,7 @@ public class ActivationActivity extends AppCompatActivity {
                     setLoading(false);
                     saveActivationState(r);
                     showActive(r);
+                    // ─── OPTIMISATION 2 : TÉLÉCHARGEMENT AUTOMATIQUE EN ARRIÈRE-PLAN ───
                     triggerSilentDownload(r);
                 });
             }
@@ -108,9 +110,7 @@ public class ActivationActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     setLoading(false);
                     clearActivationState();
-                    if ("EXPIRED".equals(status)) showExpired();
-                    else if ("DISABLED".equals(status)) showDisabled();
-                    else showPending("");
+                    showInactive(status);
                 });
             }
 
@@ -121,6 +121,8 @@ public class ActivationActivity extends AppCompatActivity {
                     SharedPreferences prefs = getSharedPreferences(PREFS_ACTIVATION, Context.MODE_PRIVATE);
                     if ("ACTIVE".equals(prefs.getString("status", ""))) {
                         showOffline(message);
+                    } else {
+                        showPending(message);
                     }
                 });
             }
@@ -151,12 +153,8 @@ public class ActivationActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     setLoading(false);
                     clearActivationState();
-                    if ("EXPIRED".equals(status)) showExpired();
-                    else if ("DISABLED".equals(status)) showDisabled();
-                    else {
-                        showPending(message);
-                        Toast.makeText(ActivationActivity.this, "Appareil non activé sur le panel.", Toast.LENGTH_LONG).show();
-                    }
+                    showInactive(status);
+                    Toast.makeText(ActivationActivity.this, "Appareil non activé sur le panel.", Toast.LENGTH_LONG).show();
                 });
             }
 
@@ -183,11 +181,11 @@ public class ActivationActivity extends AppCompatActivity {
 
     private void triggerSilentDownload(DeviceSecurity.ActivationResult r) {
         AppDatabase db = AppDatabase.get(this);
-        // Si upsertActivationPlaylist refuse de compiler, utilisez directement l'appel unifié du package core ou passez la méthode en public dans ActivationManager
         try {
-            com.wdesign.wiseiptv.mobile.util.ActivationManager.upsertActivationPlaylist(this, db, r);
+            // Appel au manager mobile pour mettre à jour la playlist et lancer le téléchargement local
+            ActivationManager.upsertActivationPlaylist(this, db, r);
         } catch (Exception e) {
-            android.util.Log.e("ActivationActivity", "Erreur d'appel au manager : " + e.getMessage());
+            android.util.Log.e("ActivationActivity", "Erreur lors du téléchargement : " + e.getMessage());
         }
     }
 
@@ -203,74 +201,84 @@ public class ActivationActivity extends AppCompatActivity {
     }
 
     private void showActive(DeviceSecurity.ActivationResult r) {
-        if (cardProvider != null) cardProvider.setVisibility(View.VISIBLE);
+        if (tvStatus != null) {
+            tvStatus.setText("✅ ACTIVÉ");[cite: 5]
+            tvStatus.setTextColor(0xFF4CAF50);[cite: 5]
+        }
+        if (tvStatusDetail != null) tvStatusDetail.setText("Votre abonnement est actif");[cite: 5]
+
+        if (cardProvider != null) cardProvider.setVisibility(View.VISIBLE);[cite: 5]
+        if (tvLogin != null) tvLogin.setText("Login : " + r.login);[cite: 5]
+        if (tvPassword != null) tvPassword.setText("Mot de passe : " + r.password);[cite: 5]
+        if (tvExpiry != null) tvExpiry.setText("Expire le : " + r.expiresAt);[cite: 5]
+        
+        if (tvProviderLabel != null && !r.dnsServers.isEmpty()) {
+            tvProviderLabel.setText("Provider : " + r.dnsServers.get(0).url);[cite: 5]
+        }
+
         if (btnAccess != null) {
-            btnAccess.setVisibility(View.VISIBLE);
-            btnAccess.setEnabled(true);
+            btnAccess.setVisibility(View.VISIBLE);[cite: 5]
+            btnAccess.setEnabled(true);[cite: 5]
         }
-        if (tvStatus != null) {
-            tvStatus.setText("✅ ACTIF");
-            tvStatus.setTextColor(0xFF4CAF50);
-        }
-        if (tvStatusDetail != null) tvStatusDetail.setText("Votre appareil est activé.");
-        if (tvProvider != null) tvProvider.setText("WiseIPTV Premium");
-        if (tvLogin != null) tvLogin.setText(r.login);
-        if (tvPassword != null) tvPassword.setText(r.password);
-        if (tvExpiry != null) tvExpiry.setText(r.expiresAt);
     }
 
-    private void showExpired() {
-        if (cardProvider != null) cardProvider.setVisibility(View.GONE);
-        if (btnAccess != null) btnAccess.setVisibility(View.GONE);
-        if (tvStatus != null) {
-            tvStatus.setText("⌛ EXPIRÉ");
-            tvStatus.setTextColor(0xFFFF9800);
+    private void showInactive(String status) {
+        if (cardProvider != null) cardProvider.setVisibility(View.GONE);[cite: 5]
+        if (btnAccess != null) btnAccess.setVisibility(View.GONE);[cite: 5]
+        
+        if (tvStatus != null && tvStatusDetail != null) {
+            if (status != null && status.contains("EXPIRED")) {
+                tvStatus.setText("⏰ EXPIRÉ");[cite: 5]
+                tvStatus.setTextColor(0xFFFF9800);[cite: 5]
+                tvStatusDetail.setText("Votre abonnement a expiré.\nContactez votre revendeur pour renouveler.");[cite: 5]
+            } else if (status != null && status.contains("DISABLED")) {
+                tvStatus.setText("🚫 DÉSACTIVÉ");[cite: 5]
+                tvStatus.setTextColor(0xFFF44336);[cite: 5]
+                tvStatusDetail.setText("Votre accès a été suspendu.\nContactez votre revendeur.");[cite: 5]
+            } else {
+                tvStatus.setText("❌ NON ENREGISTRÉ");[cite: 5]
+                tvStatus.setTextColor(0xFFF44336);[cite: 5]
+                tvStatusDetail.setText("Ce device n'est pas encore activé.\nCommuniquez votre Device Key à votre revendeur.");[cite: 5]
+            }
         }
-        if (tvStatusDetail != null) tvStatusDetail.setText("Votre abonnement a expiré.");
-    }
-
-    private void showDisabled() {
-        if (cardProvider != null) cardProvider.setVisibility(View.GONE);
-        if (btnAccess != null) btnAccess.setVisibility(View.GONE);
-        if (tvStatus != null) {
-            tvStatus.setText("🚫 DÉSACTIVÉ");
-            tvStatus.setTextColor(0xFFF44336);
-        }
-        if (tvStatusDetail != null) tvStatusDetail.setText("Votre accès a été suspendu.");
     }
 
     private void showPending(String errMsg) {
-        if (cardProvider != null) cardProvider.setVisibility(View.GONE);
-        if (btnAccess != null) btnAccess.setVisibility(View.GONE);
+        if (cardProvider != null) cardProvider.setVisibility(View.GONE);[cite: 5]
+        if (btnAccess != null) btnAccess.setVisibility(View.GONE);[cite: 5]
         if (tvStatus != null) {
-            tvStatus.setText("⏳ EN ATTENTE");
-            tvStatus.setTextColor(0xFFFFEB3B);
+            tvStatus.setText("⏳ EN ATTENTE");[cite: 5]
+            tvStatus.setTextColor(0xFFFFEB3B);[cite: 5]
         }
-        if (tvStatusDetail != null) tvStatusDetail.setText("Communiquez votre Code à votre revendeur.");
+        if (tvStatusDetail != null) {
+            tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur pour activation.\n\n(Erreur : " + errMsg + ")");[cite: 5]
+        }
     }
 
     private void showOffline(String errMsg) {
         if (tvStatus != null) {
-            tvStatus.setText("📡 HORS LIGNE (cache)");
-            tvStatus.setTextColor(0xFF9E9E9E);
+            tvStatus.setText("📡 HORS LIGNE (cache)");[cite: 5]
+            tvStatus.setTextColor(0xFF9E9E9E);[cite: 5]
         }
-        if (tvStatusDetail != null) tvStatusDetail.setText("Accès accordé depuis le cache hors-ligne.");
+        if (tvStatusDetail != null) {
+            tvStatusDetail.setText("Connexion impossible. Accès accordé depuis le cache.");[cite: 5]
+        }
         if (btnAccess != null) {
-            btnAccess.setVisibility(View.VISIBLE);
-            btnAccess.setEnabled(true);
+            btnAccess.setVisibility(View.VISIBLE);[cite: 5]
+            btnAccess.setEnabled(true);[cite: 5]
         }
     }
 
     private void setLoading(boolean loading) {
-        if (progressBar != null) progressBar.setVisibility(loading ? View.VISIBLE : View.GONE);
+        if (progressBar != null) progressBar.setVisibility(loading ? View.VISIBLE : View.GONE);[cite: 5]
         if (btnCheck != null) {
-            btnCheck.setEnabled(!loading);
-            btnCheck.setText(loading ? "Vérification…" : "Vérifier l'activation");
+            btnCheck.setEnabled(!loading);[cite: 5]
+            btnCheck.setText(loading ? "Vérification…" : "Vérifier l'activation");[cite: 5]
         }
     }
 
     private void goToMain() {
-        startActivity(new Intent(this, MainActivity.class));
-        finish();
+        startActivity(new Intent(this, MainActivity.class));[cite: 5]
+        finish(); // Ajout du finish() pour empêcher l'utilisateur d'y retourner par accident
     }
 }
