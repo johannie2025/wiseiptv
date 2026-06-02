@@ -5,7 +5,7 @@ import android.preference.PreferenceManager;
 import android.util.Log;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
-import com.wdesign.wiseiptv.mobile.util.PlaylistLoader; // Assurez-vous que le loader est partagé ou adaptez le package
+import com.wdesign.wiseiptv.tv.util.PlaylistLoader; // Assurez-vous que le loader est partagé ou adaptez le package
 import com.wdesign.wiseiptv.tv.util.ActivationManager;
 
 public class WiseIptvTvApp extends Application {

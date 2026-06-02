@@ -61,14 +61,14 @@ public class PlaylistManagerActivity extends AppCompatActivity {
     private void showAddDialog() {
         View v = getLayoutInflater().inflate(R.layout.dialog_add_playlist, null);
         EditText etName   = v.findViewById(R.id.et_playlist_name);
-        EditText etUrl    = v.findViewById(R.id.et_m3u_url); 
+        EditText etUrl    = v.findViewById(R.id.et_playlist_url); 
         EditText etServer = v.findViewById(R.id.et_xtream_server);
         EditText etUser   = v.findViewById(R.id.et_xtream_user);
         EditText etPass   = v.findViewById(R.id.et_xtream_pass);
         EditText etEpg    = v.findViewById(R.id.et_epg_url);
         RadioGroup rgType = v.findViewById(R.id.rg_type);
         View layoutXtream = v.findViewById(R.id.layout_xtream);
-        View layoutFile   = v.findViewById(R.id.layout_m3u_file); 
+        View layoutFile   = v.findViewById(R.id.layout_file); 
         
         // Asseveration de la variable globale pour éviter le findViewWithTag défaillant
         tvCurrentFileLabel = v.findViewById(R.id.tv_file_path); 
