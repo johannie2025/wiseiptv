@@ -66,7 +66,7 @@ public class ActivationActivity extends AppCompatActivity {
             });
         }
 
-        // ─── LOGIQUE D'ÉVITEMENT DU RÉAFFICHAGE ───
+        // Éviter le réaffichage si déjà actif
         SharedPreferences prefs = getSharedPreferences(PREFS_ACTIVATION, Context.MODE_PRIVATE);
         String savedStatus = prefs.getString("status", "INACTIVE");
         String expiresAt   = prefs.getString("expires_at", "");
@@ -76,7 +76,7 @@ public class ActivationActivity extends AppCompatActivity {
             return;
         }
 
-        // Vérification silencieuse automatique en tâche de fond
+        // Vérification silencieuse automatique au démarrage
         autoCheckSilently();
 
         if (btnCheck != null) {
@@ -204,7 +204,9 @@ public class ActivationActivity extends AppCompatActivity {
             tvStatusDetail.setText("Votre abonnement est actif");
         }
 
-        if (cardProvider != null) cardProvider.setVisibility(View.getInteger(View.VISIBLE));
+        // 🛠️ CORRECTION ICI : Remplacement par la valeur correcte View.VISIBLE
+        if (cardProvider != null) cardProvider.setVisibility(View.VISIBLE);
+        
         if (tvLogin != null) tvLogin.setText("Login : " + r.login);
         if (tvPassword != null) tvPassword.setText("Mot de passe : " + r.password);
         if (tvExpiry != null) tvExpiry.setText("Expire le : " + r.expiresAt);
