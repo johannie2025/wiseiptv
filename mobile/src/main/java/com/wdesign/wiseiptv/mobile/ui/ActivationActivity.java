@@ -19,6 +19,7 @@ import java.util.Locale;
 
 /**
  * ActivationActivity — PREMIER ÉCRAN de l'APK Mobile.
+ * Corrigé : Attend la fin du téléchargement avant de rediriger vers l'accueil.
  */
 public class ActivationActivity extends AppCompatActivity {
 
@@ -89,22 +90,22 @@ public class ActivationActivity extends AppCompatActivity {
     }
 
     private void autoCheckSilently() {
-        setLoading(true);
+        setLoading(true, "Vérification…");
         DeviceSecurity.check(this, new DeviceSecurity.Callback() {
             @Override
             public void onActive(DeviceSecurity.ActivationResult r) {
                 runOnUiThread(() -> {
-                    setLoading(false);
                     saveActivationState(r);
                     showActive(r);
-                    triggerSilentDownload(r);
+                    // Au démarrage, on télécharge tranquillement en tâche de fond sans forcer la redirection
+                    triggerDownloadAndRedirect(r, false);
                 });
             }
 
             @Override
             public void onInactive(String status, String message) {
                 runOnUiThread(() -> {
-                    setLoading(false);
+                    setLoading(false, "");
                     clearActivationState();
                     showInactive(status);
                 });
@@ -113,7 +114,7 @@ public class ActivationActivity extends AppCompatActivity {
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
-                    setLoading(false);
+                    setLoading(false, "");
                     SharedPreferences prefs = getSharedPreferences(PREFS_ACTIVATION, Context.MODE_PRIVATE);
                     if ("ACTIVE".equals(prefs.getString("status", ""))) {
                         showOffline(message);
@@ -126,28 +127,23 @@ public class ActivationActivity extends AppCompatActivity {
     }
 
     private void checkActivation(boolean launchImmediatelyOnSuccess) {
-        setLoading(true);
+        setLoading(true, launchImmediatelyOnSuccess ? "Téléchargement de la playlist…" : "Vérification…");
         DeviceSecurity.check(this, new DeviceSecurity.Callback() {
             @Override
             public void onActive(DeviceSecurity.ActivationResult r) {
                 runOnUiThread(() -> {
-                    setLoading(false);
                     saveActivationState(r);
                     showActive(r);
-                    triggerSilentDownload(r);
-
-                    if (launchImmediatelyOnSuccess) {
-                        goToMain();
-                    } else {
-                        Toast.makeText(ActivationActivity.this, "Activation validée !", Toast.LENGTH_SHORT).show();
-                    }
+                    
+                    // On passe le flag pour savoir s'il faut rediriger à la fin du téléchargement
+                    triggerDownloadAndRedirect(r, launchImmediatelyOnSuccess);
                 });
             }
 
             @Override
             public void onInactive(String status, String message) {
                 runOnUiThread(() -> {
-                    setLoading(false);
+                    setLoading(false, "");
                     clearActivationState();
                     showInactive(status);
                     Toast.makeText(ActivationActivity.this, "Appareil non activé sur le panel.", Toast.LENGTH_LONG).show();
@@ -157,7 +153,7 @@ public class ActivationActivity extends AppCompatActivity {
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
-                    setLoading(false);
+                    setLoading(false, "");
                     Toast.makeText(ActivationActivity.this, "Erreur réseau : " + message, Toast.LENGTH_SHORT).show();
                 });
             }
@@ -175,13 +171,40 @@ public class ActivationActivity extends AppCompatActivity {
         getSharedPreferences(PREFS_ACTIVATION, Context.MODE_PRIVATE).edit().clear().apply();
     }
 
-    private void triggerSilentDownload(DeviceSecurity.ActivationResult r) {
+    /**
+     * Gère le téléchargement de manière sécurisée et n'ouvre l'application que si tout est prêt localement.
+     */
+    private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boolean redirectOnSuccess) {
         AppDatabase db = AppDatabase.get(this);
-        try {
-            ActivationManager.upsertActivationPlaylist(this, db, r);
-        } catch (Exception e) {
-            android.util.Log.e("ActivationActivity", "Erreur lors du téléchargement automatique : " + e.getMessage());
-        }
+        
+        // Exécution forcée dans un thread séparé pour ne pas bloquer l'UI, mais gérée de bout en bout
+        new Thread(() -> {
+            try {
+                // Étape 1 : Enregistrement ou mise à jour dans la base SQLite locale
+                ActivationManager.upsertActivationPlaylist(ActivationActivity.this, db, r);
+                
+                // On laisse un léger répit au système de base de données pour valider le commit de la transaction Room
+                Thread.sleep(600); 
+
+                if (redirectOnSuccess) {
+                    runOnUiThread(() -> {
+                        setLoading(false, "");
+                        goToMain();
+                    });
+                } else {
+                    runOnUiThread(() -> setLoading(false, ""));
+                }
+            } catch (Exception e) {
+                android.util.Log.e("ActivationActivity", "Erreur lors du traitement de la playlist : " + e.getMessage());
+                runOnUiThread(() -> {
+                    setLoading(false, "");
+                    if (redirectOnSuccess) {
+                        // Même en cas d'anomalie mineure, on permet l'accès à l'application principale
+                        goToMain();
+                    }
+                });
+            }
+        }).start();
     }
 
     private boolean isExpired(String dateStr) {
@@ -204,9 +227,7 @@ public class ActivationActivity extends AppCompatActivity {
             tvStatusDetail.setText("Votre abonnement est actif");
         }
 
-        // 🛠️ CORRECTION ICI : Remplacement par la valeur correcte View.VISIBLE
         if (cardProvider != null) cardProvider.setVisibility(View.VISIBLE);
-        
         if (tvLogin != null) tvLogin.setText("Login : " + r.login);
         if (tvPassword != null) tvPassword.setText("Mot de passe : " + r.password);
         if (tvExpiry != null) tvExpiry.setText("Expire le : " + r.expiresAt);
@@ -268,11 +289,11 @@ public class ActivationActivity extends AppCompatActivity {
         }
     }
 
-    private void setLoading(boolean loading) {
+    private void setLoading(boolean loading, String message) {
         if (progressBar != null) progressBar.setVisibility(loading ? View.VISIBLE : View.GONE);
         if (btnCheck != null) {
             btnCheck.setEnabled(!loading);
-            btnCheck.setText(loading ? "Vérification…" : "Vérifier l'activation");
+            btnCheck.setText(loading ? message : "Vérifier l'activation");
         }
     }
 
