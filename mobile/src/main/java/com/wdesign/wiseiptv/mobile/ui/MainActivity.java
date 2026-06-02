@@ -31,11 +31,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private AppDatabase db;
     private int currentTab = 0;         // 0=All,1=Live,2=Films,3=Series,4=Fav
     private String currentGroup = null; // null = tous les groupes
-
-    @Override protected void onCreate(Bundle savedInstanceState) {
+	
+@Override 
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        db = AppDatabase.get(this);
+        
+        db          = AppDatabase.get(this);
         rvChannels  = findViewById(R.id.rv_channels);
         progressBar = findViewById(R.id.progress_bar);
         tvEmpty     = findViewById(R.id.tv_empty);
@@ -45,17 +47,72 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         spinnerGroup= findViewById(R.id.spinner_group);
 
         adapter = new ChannelAdapter(this);
+        // Utilisation d'un Grid de 3 colonnes adapté au mobile
         rvChannels.setLayoutManager(new GridLayoutManager(this, 3));
         rvChannels.setAdapter(adapter);
 
-        setupTabs(); setupSearch(); setupBottomNav(); setupGroupSpinner();
+        setupTabs(); 
+        setupSearch(); 
+        setupBottomNav(); 
+        setupGroupSpinner();
 
-        // Première ouverture sans playlist → propose d'en ajouter une
-        Executors.newSingleThreadExecutor().execute(() -> {
-            if (db.playlistDao().getAllSync().isEmpty()) {
-                runOnUiThread(this::showAddPlaylistDialog);
-            } else {
-                runOnUiThread(this::observeCurrentTab);
+        // ─── TÉLÉCHARGEMENT TRANSPARENT EN ARRIÈRE-PLAN ───
+        
+        // 1. On affiche la barre de chargement directement sur la page principale ouverte
+        if (progressBar != null) {
+            progressBar.setVisibility(View.VISIBLE);
+        }
+
+        // 2. On charge immédiatement le cache local existant pour que l'utilisateur voit déjà les chaînes s'il y en a
+        observeCurrentTab();
+
+        // 3. Interrogation asynchrone sécurisée du serveur d'activation pour lancer la mise à jour
+        com.wdesign.wiseiptv.core.security.DeviceSecurity.check(this, new com.wdesign.wiseiptv.core.security.DeviceSecurity.Callback() {
+            @Override
+            public void onActive(com.wdesign.wiseiptv.core.security.DeviceSecurity.ActivationResult r) {
+                // Lance le téléchargement récursif asynchrone (non bloquant) de tous les serveurs DNS actifs
+                com.wdesign.wiseiptv.mobile.util.ActivationManager.downloadAllPlaylistsAsync(
+                    getApplicationContext(), 
+                    db, 
+                    r, 
+                    new com.wdesign.wiseiptv.mobile.util.ActivationManager.OnDownloadCallback() {
+                        @Override
+                        public void onSuccess() {
+                            // Téléchargement de tous les serveurs achevé avec succès
+                            runOnUiThread(() -> {
+                                if (progressBar != null) progressBar.setVisibility(View.GONE);
+                                observeCurrentTab(); // Rafraîchit le catalogue à l'écran
+                                Toast.makeText(MainActivity.this, "Chaînes synchronisées !", Toast.LENGTH_SHORT).show();
+                            });
+                        }
+
+                        @Override
+                        public void onFailure(String msg) {
+                            // Un ou plusieurs serveurs ont échoué, on masque le loader et on reste sur les données locales
+                            runOnUiThread(() -> {
+                                if (progressBar != null) progressBar.setVisibility(View.GONE);
+                                observeCurrentTab();
+                            });
+                        }
+                    }
+                );
+            }
+
+            @Override
+            public void onInactive(String status, String message) {
+                // Appareil coupé ou expiré sur le panel
+                runOnUiThread(() -> {
+                    if (progressBar != null) progressBar.setVisibility(View.GONE);
+                    Toast.makeText(MainActivity.this, "Abonnement inactif ou expiré.", Toast.LENGTH_LONG).show();
+                });
+            }
+
+            @Override
+            public void onError(String message) {
+                // Mode hors-ligne (Pas de réseau) : On retire le loader, l'utilisateur profite du cache local
+                runOnUiThread(() -> {
+                    if (progressBar != null) progressBar.setVisibility(View.GONE);
+                });
             }
         });
     }

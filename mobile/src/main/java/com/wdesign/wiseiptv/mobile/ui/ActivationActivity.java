@@ -175,32 +175,19 @@ public class ActivationActivity extends AppCompatActivity {
      * Gère le téléchargement de manière sécurisée et n'ouvre l'application que si tout est prêt localement.
      */
 private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boolean redirectOnSuccess) {
+    if (redirectOnSuccess) {
+        // On ouvre l'application immédiatement sans attendre !
+        goToMain();
+    } else {
+        // Si c'est la vérification automatique du démarrage, on peut lancer le chargement 
+        // en arrière-plan sans bloquer l'interface
         AppDatabase db = AppDatabase.get(this);
-        
-        // Appel de la structure asynchrone récursive
-        ActivationManager.downloadAllPlaylistsAsync(this, db, r, new ActivationManager.OnDownloadCallback() {
-            @Override
-            public void onSuccess() {
-                runOnUiThread(() -> {
-                    setLoading(false, "");
-                    if (redirectOnSuccess) {
-                        goToMain();
-                    }
-                });
-            }
-
-            @Override
-            public void onFailure(String msg) {
-                runOnUiThread(() -> {
-                    setLoading(false, "");
-                    if (redirectOnSuccess) {
-                        // En cas de problème de téléchargement global, on laisse quand même entrer
-                        goToMain();
-                    }
-                });
-            }
+        ActivationManager.downloadAllPlaylistsAsync(getApplicationContext(), db, r, new ActivationManager.OnDownloadCallback() {
+            @Override public void onSuccess() { android.util.Log.d("Activation", "Sync auto réussie"); }
+            @Override public void onFailure(String msg) { android.util.Log.e("Activation", "Sync auto échec: " + msg); }
         });
     }
+}
 
     private boolean isExpired(String dateStr) {
         try {

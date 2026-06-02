@@ -72,7 +72,7 @@ public class ActivationManager {
             return;
         }
         
-        // Lance le téléchargement à partir de l'index 0
+        // Lance le téléchargement en cascade à partir du premier DNS (index 0)
         downloadDnsStep(ctx, db, r, 0, callback);
     }
 
@@ -82,7 +82,7 @@ public class ActivationManager {
     private static void downloadDnsStep(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r, int index, OnDownloadCallback callback) {
         List<DeviceSecurity.DnsEntry> list = r.dnsServers;
         
-        // Condition de fin : si on a traité tous les DNS
+        // Condition d'arrêt : si on a traité tous les DNS avec succès
         if (index >= list.size()) {
             SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
             long firstPid = prefs.getLong("playlist_id_dns_0", -1);
@@ -95,7 +95,7 @@ public class ActivationManager {
 
         DeviceSecurity.DnsEntry dns = list.get(index);
         
-        // Exécution des opérations de base de données hors du thread principal
+        // Exécution isolée des opérations de base de données hors du thread principal
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -113,7 +113,7 @@ public class ActivationManager {
                 pl.username     = r.login;
                 pl.password     = r.password;
                 pl.isActive     = true;
-                pl.lastUpdated  = 0; // Force le PlaylistLoader à tout synchroniser
+                pl.lastUpdated  = 0; // Force le PlaylistLoader à tout vider et synchroniser à neuf
 
                 if (pl.id == 0) {
                     pl.id = db.playlistDao().insert(pl);
@@ -124,19 +124,19 @@ public class ActivationManager {
 
                 Log.d(TAG, "Téléchargement en cours pour le serveur [" + index + "] : " + dns.url);
                 
-                // Appel du chargeur de chaînes
+                // Appel non-bloquant du chargeur de chaînes natif
                 PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
                     @Override 
                     public void onDone(int count) {
                         Log.d(TAG, "Serveur [" + index + "] terminé : " + count + " chaînes.");
-                        // Succès : Passage immédiat au DNS suivant
+                        // Le callback déclenche le DNS suivant de manière fluide
                         downloadDnsStep(ctx, db, r, index + 1, callback);
                     }
                     
                     @Override 
                     public void onError(String msg) {
                         Log.e(TAG, "Erreur sur le serveur [" + index + "] : " + msg);
-                        // Même en cas d'erreur sur un serveur, on continue sur les suivants
+                        // Même si un serveur échoue (ex: timeout), on passe quand même au suivant
                         downloadDnsStep(ctx, db, r, index + 1, callback);
                     }
                 });
