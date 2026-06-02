@@ -164,39 +164,42 @@ jobs:
             echo "=== Installation APK ==="
             adb install -r apk/mobile-debug.apk
 
-            # Lancer l'ActivationActivity (premier écran)
-            echo "=== Lancement de l'app ==="
-            adb shell am start -n "com.wdesign.wiseiptv/.ui.ActivationActivity"
-            sleep 8
+            ## Lancer l'ActivationActivity (premier écran)
+          echo "=== Lancement de l'app ==="
+          # CORRECTION : Chemin absolu avec le package d'installation et la classe Java réelle
+          adb shell am start -n "com.wdesign.wiseiptv/com.wdesign.wiseiptv.mobile.ui.ActivationActivity"
+          sleep 8
 
-            # Simuler le clic sur "Accéder au contenu" (btn_access)
-            echo "=== Clic btn_access ==="
-            adb shell input keyevent 66  # ENTER — ou tap coordonnées
-            sleep 5
+          # Simuler le clic sur "Accéder au contenu" (btn_access)
+          echo "=== Clic btn_access ==="
+          adb shell input keyevent 66  # ENTER — ou tap coordonnées
+          sleep 5
 
-            # Simuler un retour arrière puis relance (test "cesse de fonctionner")
-            echo "=== Test retour + relance ==="
-            adb shell input keyevent 4   # BACK
-            sleep 2
-            adb shell am start -n "com.wdesign.wiseiptv.mobile/.ui.MainActivity"
-            sleep 5
+          # Simuler un retour arrière puis relance (test "cesse de fonctionner")
+          echo "=== Test retour + relance ==="
+          adb shell input keyevent 4   # BACK
+          sleep 2
+          
+          # CORRECTION : Chemin absolu aussi pour la MainActivity
+          adb shell am start -n "com.wdesign.wiseiptv/com.wdesign.wiseiptv.mobile.ui.MainActivity"
+          sleep 5
 
-            # Arrêter logcat
-            kill $LOGCAT_PID 2>/dev/null || true
+          # Arrêter logcat
+          kill $LOGCAT_PID 2>/dev/null || true
 
-            # Extraire uniquement les crashs et erreurs
-            echo "=== CRASH / FATAL LOG ==="
-            grep -E "FATAL|AndroidRuntime|EXCEPTION|Caused by|at com.wdesign" \
-              /tmp/logcat_full.txt > /tmp/logcat_crash.txt || true
-            cat /tmp/logcat_crash.txt
+          # Extraire uniquement les crashs et erreurs
+          echo "=== CRASH / FATAL LOG ==="
+          # CORRECTION : Suppression de l'antislash orphelin qui coupait la commande en deux
+          grep -E "FATAL|AndroidRuntime|EXCEPTION|Caused by|at com.wdesign" /tmp/logcat_full.txt > /tmp/logcat_crash.txt || true
+          cat /tmp/logcat_crash.txt
 
-            # Vérifier s'il y a eu un crash
-            if grep -q "FATAL EXCEPTION" /tmp/logcat_full.txt; then
-              echo "❌ CRASH DÉTECTÉ"
-              exit 1
-            else
-              echo "✅ Pas de crash détecté"
-            fi
+          # Vérifier s'il y a eu un crash
+          if grep -q "FATAL EXCEPTION" /tmp/logcat_full.txt; then
+            echo "❌ CRASH DÉTECTÉ"
+            exit 1
+          else
+            echo "✅ Pas de crash détecté"
+          fi
 
       - name: Upload logcat complet (toujours, même si pas de crash)
         if: always()
