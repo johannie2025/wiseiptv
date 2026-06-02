@@ -1,175 +1,184 @@
-package com.wdesign.wiseiptv.mobile.ui;
+package com.wdesign.wiseiptv.mobile.util;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.Intent;
-import android.os.Bundle;
-import android.view.View;
-import android.widget.*;
-import androidx.appcompat.app.AppCompatActivity;
+import android.content.SharedPreferences;
+import android.util.Log;
+import com.wdesign.wiseiptv.core.db.AppDatabase;
+import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
-import com.wdesign.wiseiptv.mobile.R;
-import com.wdesign.wiseiptv.mobile.util.ActivationManager;
+import java.util.List;
+import java.util.concurrent.Executors;
 
 /**
- * ActivationActivity — PREMIER ÉCRAN de l'APK Mobile.
- *
- * Affiche :
- *  • Device Key (à communiquer à l'admin/revendeur pour activation)
- *  • Statut : EN ATTENTE / ACTIF / EXPIRÉ / DÉSACTIVÉ
- *  • Provider, Login, Password (renseignés automatiquement après activation serveur)
- *  • Bouton [Vérifier l'activation] → interroge le panel
- *  • Bouton [Accéder au contenu] → visible seulement si ACTIF
- *
- * Flux :
- *  1. User installe l'APK → voit sa device_key → la communique à admin/revendeur
- *  2. Admin/Revendeur active le device dans le panel web
- *  3. User appuie sur "Vérifier" → le serveur renvoie login/password/DNS
- *  4. Les playlists sont téléchargées automatiquement
- *  5. Bouton "Accéder au contenu" s'active → MainActivity
+ * ActivationManager — Gère le cycle de vie de l'activation :
+ * Télécharge toutes les chaînes depuis TOUS les DNS de manière séquentielle asynchrone.
  */
-public class ActivationActivity extends AppCompatActivity {
+public class ActivationManager {
+    private static final String TAG = "ActivationManager";
+    private static final String PREFS = "wise_activation";
 
-    private TextView  tvDeviceKey, tvStatus, tvStatusDetail;
-    private TextView  tvProviderLabel, tvLogin, tvPassword, tvExpiry;
-    private View      cardProvider;
-    private Button    btnCheck, btnAccess, btnCopy;
-    private ProgressBar progressBar;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_activation);
-
-        tvDeviceKey    = findViewById(R.id.tv_device_key);
-        tvStatus       = findViewById(R.id.tv_status);
-        tvStatusDetail = findViewById(R.id.tv_status_detail);
-        tvProviderLabel= findViewById(R.id.tv_provider_label);
-        tvLogin        = findViewById(R.id.tv_login);
-        tvPassword     = findViewById(R.id.tv_password);
-        tvExpiry       = findViewById(R.id.tv_expiry);
-        cardProvider   = findViewById(R.id.card_provider);
-        btnCheck       = findViewById(R.id.btn_check);
-        btnAccess      = findViewById(R.id.btn_access);
-        btnCopy        = findViewById(R.id.btn_copy_key);
-        progressBar    = findViewById(R.id.progress_bar);
-
-        // Afficher la device_key
-        String key = DeviceSecurity.getOrCreateKey(this);
-        tvDeviceKey.setText(key);
-
-        // Copier la clé dans le presse-papier
-        btnCopy.setOnClickListener(v -> {
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
-            Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
-        });
-
-        // Vérifier l'activation
-        btnCheck.setOnClickListener(v -> checkActivation());
-
-        // Accéder au contenu (si déjà activé)
-        btnAccess.setOnClickListener(v -> goToMain());
-
-        // Vérifier automatiquement au démarrage
-        checkActivation();
+    public interface OnResult {
+        void onActivated(DeviceSecurity.ActivationResult r);
+        void onExpired(String status);
+        void onError(String msg);
     }
 
-    private void checkActivation() {
-        setLoading(true);
-        ActivationManager.checkAndSync(this, new ActivationManager.OnResult() {
-            @Override
-            public void onActivated(DeviceSecurity.ActivationResult r) {
-                runOnUiThread(() -> {
-                    setLoading(false);
-                    showActive(r);
-                });
+    public interface OnDownloadCallback {
+        void onSuccess();
+        void onFailure(String msg);
+    }
+
+    /** À appeler au démarrage de l'app (WiseApp.onCreate) */
+    public static void checkAndSync(Context ctx, OnResult cb) {
+        AppDatabase db = AppDatabase.get(ctx);
+        Executors.newSingleThreadExecutor().execute(() -> {
+            DeviceSecurity.check(ctx, new DeviceSecurity.Callback() {
+                @Override 
+                public void onActive(DeviceSecurity.ActivationResult r) {
+                    saveActivationPrefs(ctx, r);
+                    downloadAllPlaylistsAsync(ctx, db, r, new OnDownloadCallback() {
+                        @Override
+                        public void onSuccess() {
+                            cb.onActivated(r);
+                        }
+                        @Override
+                        public void onFailure(String msg) {
+                            cb.onError(msg);
+                        }
+                    });
+                }
+                
+                @Override 
+                public void onInactive(String status, String message) {
+                    purgeActivationPlaylists(ctx, db);
+                    cb.onExpired(status + ": " + message);
+                }
+                
+                @Override 
+                public void onError(String message) {
+                    cb.onError(message);
+                }
+            });
+        });
+    }
+
+    /**
+     * Déclenche le processus de téléchargement séquentiel
+     */
+    public static void downloadAllPlaylistsAsync(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r, OnDownloadCallback callback) {
+        if (r.dnsServers == null || r.dnsServers.isEmpty()) {
+            Log.e(TAG, "Aucun DNS reçu du serveur d'activation.");
+            callback.onFailure("Aucun serveur de chaînes configuré.");
+            return;
+        }
+        
+        // Lance le téléchargement en cascade à partir du premier DNS (index 0)
+        downloadDnsStep(ctx, db, r, 0, callback);
+    }
+
+    /**
+     * Télécharge un DNS spécifique puis s'appelle lui-même pour le suivant (Récursion asynchrone)
+     */
+    private static void downloadDnsStep(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r, int index, OnDownloadCallback callback) {
+        List<DeviceSecurity.DnsEntry> list = r.dnsServers;
+        
+        // Condition d'arrêt : si on a traité tous les DNS avec succès
+        if (index >= list.size()) {
+            SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            long firstPid = prefs.getLong("playlist_id_dns_0", -1);
+            if (firstPid > 0) {
+                prefs.edit().putLong("playlist_id", firstPid).apply();
             }
-            @Override
-            public void onExpired(String status) {
-                runOnUiThread(() -> {
-                    setLoading(false);
-                    showInactive(status);
-                });
-            }
-            @Override
-            public void onError(String msg) {
-                runOnUiThread(() -> {
-                    setLoading(false);
-                    // Vérifier le statut sauvegardé localement
-                    String saved = ActivationManager.getSavedStatus(ActivationActivity.this);
-                    if ("ACTIVE".equals(saved)) {
-                        // Mode offline : on autorise l'accès avec les données en cache
-                        showOffline(msg);
-                    } else {
-                        showPending(msg);
+            callback.onSuccess();
+            return;
+        }
+
+        DeviceSecurity.DnsEntry dns = list.get(index);
+        
+        // Exécution isolée des opérations de base de données hors du thread principal
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+                String prefKey = "playlist_id_dns_" + index;
+                long existingId = prefs.getLong(prefKey, -1);
+
+                PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
+                if (pl == null) {
+                    pl = new PlaylistEntity();
+                }
+
+                pl.name         = "Abonnement - Serveur " + (index + 1);
+                pl.type         = PlaylistEntity.TYPE_XTREAM;
+                pl.url          = dns.url;
+                pl.username     = r.login;
+                pl.password     = r.password;
+                pl.isActive     = true;
+                pl.lastUpdated  = 0; // Force le PlaylistLoader à tout vider et synchroniser à neuf
+
+                if (pl.id == 0) {
+                    pl.id = db.playlistDao().insert(pl);
+                    prefs.edit().putLong(prefKey, pl.id).apply();
+                } else {
+                    db.playlistDao().update(pl);
+                }
+
+                Log.d(TAG, "Téléchargement en cours pour le serveur [" + index + "] : " + dns.url);
+                
+                // Appel non-bloquant du chargeur de chaînes natif
+                PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
+                    @Override 
+                    public void onDone(int count) {
+                        Log.d(TAG, "Serveur [" + index + "] terminé : " + count + " chaînes.");
+                        // Le callback déclenche le DNS suivant de manière fluide
+                        downloadDnsStep(ctx, db, r, index + 1, callback);
+                    }
+                    
+                    @Override 
+                    public void onError(String msg) {
+                        Log.e(TAG, "Erreur sur le serveur [" + index + "] : " + msg);
+                        // Même si un serveur échoue (ex: timeout), on passe quand même au suivant
+                        downloadDnsStep(ctx, db, r, index + 1, callback);
                     }
                 });
+
+            } catch (Exception e) {
+                Log.e(TAG, "Erreur fatale BDD à l'index " + index + " : " + e.getMessage());
+                downloadDnsStep(ctx, db, r, index + 1, callback);
             }
         });
     }
 
-    private void showActive(DeviceSecurity.ActivationResult r) {
-        tvStatus.setText("✅ ACTIVÉ");
-        tvStatus.setTextColor(0xFF4CAF50);
-        tvStatusDetail.setText("Votre abonnement est actif");
-
-        // Afficher les infos provider
-        cardProvider.setVisibility(View.VISIBLE);
-        tvLogin.setText("Login : " + r.login);
-        tvPassword.setText("Mot de passe : " + r.password);
-        tvExpiry.setText("Expire le : " + r.expiresAt);
-        if (!r.dnsServers.isEmpty()) {
-            tvProviderLabel.setText("Provider : " + r.dnsServers.get(0).url);
+    private static void purgeActivationPlaylists(Context ctx, AppDatabase db) {
+        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        for (int i = 0; i < 20; i++) {
+            String prefKey = "playlist_id_dns_" + i;
+            long pid = prefs.getLong(prefKey, -1);
+            if (pid > 0) {
+                db.channelDao().deleteByPlaylist(pid);
+                PlaylistEntity pl = db.playlistDao().findById(pid);
+                if (pl != null) db.playlistDao().delete(pl);
+                prefs.edit().remove(prefKey).apply();
+            }
         }
-
-        btnAccess.setVisibility(View.VISIBLE);
-        btnAccess.setEnabled(true);
-    }
-
-    private void showInactive(String status) {
-        cardProvider.setVisibility(View.GONE);
-        btnAccess.setVisibility(View.GONE);
-        if (status.contains("EXPIRED")) {
-            tvStatus.setText("⏰ EXPIRÉ");
-            tvStatus.setTextColor(0xFFFF9800);
-            tvStatusDetail.setText("Votre abonnement a expiré.\nContactez votre revendeur pour renouveler.");
-        } else if (status.contains("DISABLED")) {
-            tvStatus.setText("🚫 DÉSACTIVÉ");
-            tvStatus.setTextColor(0xFFF44336);
-            tvStatusDetail.setText("Votre accès a été suspendu.\nContactez votre revendeur.");
-        } else {
-            tvStatus.setText("❌ NON ENREGISTRÉ");
-            tvStatus.setTextColor(0xFFF44336);
-            tvStatusDetail.setText("Ce device n'est pas encore activé.\nCommuniquez votre Device Key à votre revendeur.");
+        long oldPid = prefs.getLong("playlist_id", -1);
+        if (oldPid > 0) {
+            db.channelDao().deleteByPlaylist(oldPid);
+            PlaylistEntity pl = db.playlistDao().findById(oldPid);
+            if (pl != null) db.playlistDao().delete(pl);
+            prefs.edit().remove("playlist_id").apply();
         }
+        prefs.edit().remove("status").remove("expires_at").remove("login").apply();
     }
 
-    private void showPending(String errMsg) {
-        cardProvider.setVisibility(View.GONE);
-        btnAccess.setVisibility(View.GONE);
-        tvStatus.setText("⏳ EN ATTENTE");
-        tvStatus.setTextColor(0xFFFFEB3B);
-        tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur pour activation.\n\n(Erreur : " + errMsg + ")");
+    private static void saveActivationPrefs(Context ctx, DeviceSecurity.ActivationResult r) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("status", "ACTIVE")
+            .putString("expires_at", r.expiresAt)
+            .putString("login", r.login)
+            .apply();
     }
 
-    private void showOffline(String errMsg) {
-        tvStatus.setText("📡 HORS LIGNE (cache)");
-        tvStatus.setTextColor(0xFF9E9E9E);
-        tvStatusDetail.setText("Connexion impossible. Accès accordé depuis le cache.");
-        btnAccess.setVisibility(View.VISIBLE);
-        btnAccess.setEnabled(true);
-    }
-
-    private void setLoading(boolean loading) {
-        progressBar.setVisibility(loading ? View.VISIBLE : View.GONE);
-        btnCheck.setEnabled(!loading);
-        btnCheck.setText(loading ? "Vérification…" : "Vérifier l'activation");
-    }
-
-    private void goToMain() {
-        startActivity(new Intent(this, MainActivity.class));
-        // Ne pas finish() → retour possible depuis MainActivity
+    public static String getSavedStatus(Context ctx) {
+        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("status", "UNKNOWN");
     }
 }
