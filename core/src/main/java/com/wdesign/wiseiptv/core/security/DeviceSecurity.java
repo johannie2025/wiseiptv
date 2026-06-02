@@ -38,7 +38,7 @@ public final class DeviceSecurity {
         public final String expiresAt;
         public final List<DnsEntry> dnsServers;
 
-        ActivationResult(String dk, String l, String p, String exp, List<DnsEntry> dns) {
+        public ActivationResult(String dk, String l, String p, String exp, List<DnsEntry> dns) {
             deviceKey = dk; login = l; password = p; expiresAt = exp; dnsServers = dns;
         }
         /** DNS principal (priorité 0) */
@@ -58,7 +58,7 @@ public final class DeviceSecurity {
         public final String url;
         public final String epgUrl;
         public final int    priority;
-        DnsEntry(String u, String e, int p) { url=u; epgUrl=e; priority=p; }
+        public DnsEntry(String u, String e, int p) { url=u; epgUrl=e; priority=p; }
     }
 
     // ── Callback ──────────────────────────────────────────────────
