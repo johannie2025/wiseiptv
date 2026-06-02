@@ -47,7 +47,7 @@ public class ActivationManager {
         });
     }
 
-  private static void upsertActivationPlaylist(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) {
+private static void upsertActivationPlaylist(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long pid = prefs.getLong("playlist_id", 0);
 
@@ -60,10 +60,10 @@ public class ActivationManager {
         }
 
         pl.name = "Abonnement IPTV (Actif)";
-        pl.type = 2; // CORRECT : Rétabli en int (ex: 2 pour Xtream/API)
+        pl.type = 2; // Type Xtream / API
         
-        // CORRECT : Utilise le DNS principal exposé par la classe d'activation
-        pl.serverUrl = r.primaryDns(); 
+        // 🛠️ CORRECTION : Utilisation de pl.server (conforme à votre PlaylistEntity)
+        pl.server = r.primaryDns(); 
         
         pl.username = r.login;
         pl.password = r.password;
@@ -77,16 +77,18 @@ public class ActivationManager {
             db.playlistDao().update(pl);
         }
 
-        // CORRECT : Réalignement avec les signatures d'origine de votre Callback
+        // 🛠️ CORRECTION : Remplacement des appels Log par un suivi standard ou android.util.Log autonome
         PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
             @Override 
             public void onDone(int count) {
-                Log.d(TAG, "Flux chargés avec succès : " + count);
+                // Succès : flux chargés en arrière-plan
+                android.util.Log.d("ActivationManager", "Flux chargés avec succès : " + count);
             }
             
             @Override 
             public void onError(String msg) {
-                Log.e(TAG, "Erreur de chargement des flux : " + msg);
+                // Échec du chargement
+                android.util.Log.e("ActivationManager", "Erreur de chargement des flux : " + msg);
             }
         });
     }
