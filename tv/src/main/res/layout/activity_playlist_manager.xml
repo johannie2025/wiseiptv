@@ -41,6 +41,20 @@
             android:textSize="14sp"
             android:layout_marginBottom="24dp" />
 
+        <Button
+            android:id="@+id/btn_add_playlist"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="➕ Ajouter une Playlist"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:focusable="true"
+            android:clickable="true"
+            android:background="@android:drawable/btn_default"
+            android:layout_marginBottom="16dp" />
+
         <ProgressBar
             android:id="@+id/progress_bar"
             android:layout_width="40dp"

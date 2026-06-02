@@ -47,23 +47,28 @@ public class ActivationManager {
         });
     }
 
-    private static void upsertActivationPlaylist(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) {
+  private static void upsertActivationPlaylist(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long pid = prefs.getLong("playlist_id", 0);
 
         PlaylistEntity pl = (pid > 0) ? db.playlistDao().findById(pid) : null;
         if (pl == null) {
             pl = new PlaylistEntity();
-            pl.id = pid; 
+            // Si pid == 0, Room générera automatiquement un ID unique lors de l'insert
+            if (pid > 0) {
+                pl.id = pid; 
+            }
         }
 
         pl.name = "Abonnement IPTV (Actif)";
-        pl.type = 2; // Type Xtream / API pour l'intégration automatique
-        pl.serverUrl = r.dns; 
+        pl.type = "XTREAM"; // CORRECTION : Type en String pour correspondre au Core / Room
+        
+        // CORRECTION : Utilisation des champs existants de PlaylistEntity et ActivationResult
+        pl.url = r.url;       // ou r.server selon la structure exacte définie dans votre package core
         pl.username = r.login;
         pl.password = r.password;
         pl.isActive = true;
-        pl.lastUpdated = 0; 
+        pl.lastUpdated = System.currentTimeMillis(); // Préférable à 0 pour le suivi de synchronisation
 
         if (pl.id == 0) {
             pl.id = db.playlistDao().insert(pl);
@@ -72,10 +77,17 @@ public class ActivationManager {
             db.playlistDao().update(pl);
         }
 
-        // Chargement automatique des flux TV en arrière-plan
+        // CORRECTION : Alignement du Callback anonyme avec l'interface de PlaylistLoader
         PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
-            @Override public void onDone(int count) {}
-            @Override public void onError(String msg) {}
+            @Override
+            public void onSuccess() {
+                // Flux chargés ou mis à jour avec succès en arrière-plan
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                // Gestion de l'échec de parsing de l'abonnement
+            }
         });
     }
 

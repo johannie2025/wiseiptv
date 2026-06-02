@@ -17,14 +17,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 /**
- * DeviceSecurity — Génère une device_key unique + interroge le panel d'activation.
- *
- * Utilisation :
- *   DeviceSecurity.check(context, new DeviceSecurity.Callback() {
- *       public void onActive(ActivationResult r) { // lancer la playlist }
- *       public void onInactive(String status, String message) { // afficher erreur }
- *       public void onError(String message) { // réseau / timeout }
- *   });
+ * DeviceSecurity — Génère une device_key unique (Code court à 6 caractères) + interroge le panel d'activation.
  */
 public final class DeviceSecurity {
 
@@ -69,11 +62,8 @@ public final class DeviceSecurity {
 
     // ── Callback ──────────────────────────────────────────────────
     public interface Callback {
-        /** Device ACTIVE → accès autorisé */
         void onActive(ActivationResult result);
-        /** Device DISABLED / EXPIRED / NOT_FOUND */
         void onInactive(String status, String message);
-        /** Erreur réseau ou serveur */
         void onError(String message);
     }
 
@@ -125,16 +115,18 @@ public final class DeviceSecurity {
     public static String getOrCreateKey(Context ctx) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         String stored = prefs.getString(KEY_DEVICE, null);
-        if (stored != null && stored.length() == 64) return stored;
+        
+        // CORRECTION : Accepte maintenant uniquement le format court à 6 caractères
+        if (stored != null && stored.length() == 6) return stored;
+        
         String key = generateKey(ctx);
         prefs.edit().putString(KEY_DEVICE, key).apply();
         return key;
     }
 
     /**
-     * Génère une clé SHA-256 déterministe basée sur le matériel.
-     * Combine ANDROID_ID + Build.FINGERPRINT + Build.SERIAL
-     * pour maximiser l'unicité sur TV boxes, téléphones et tablettes.
+     * CORRECTION : Génère un identifiant unique court à 6 caractères (ex: A6J0B8)
+     * Déterministe et stable par rapport au matériel (téléphone ou Box TV).
      */
     private static String generateKey(Context ctx) {
         String androidId = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ANDROID_ID);
@@ -142,15 +134,38 @@ public final class DeviceSecurity {
         @SuppressWarnings("deprecation")
         String serial = Build.SERIAL != null && !Build.SERIAL.equals(Build.UNKNOWN) ? Build.SERIAL : "";
         String raw = "WISE:" + androidId + "|" + fingerprint + "|" + serial;
+        
         try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            // Hachage MD5 suffisant et performant pour condenser la clé matérielle
+            MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] hash = md.digest(raw.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(64);
-            for (byte b : hash) sb.append(String.format("%02x", b));
-            return sb.toString(); // 64 hex chars
+            
+            // Conversion déterministe en Base 36 alphanumérique
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < hash.length && sb.length() < 6; i++) {
+                int value = Math.abs(hash[i] & 0xFF);
+                sb.append(Integer.toString(value % 36, 36));
+            }
+            
+            // Formatage final en majuscules
+            String code = sb.toString().toUpperCase();
+            
+            // Remplacement des caractères ambigus pour éviter les erreurs de lecture
+            code = code.replace("O", "0").replace("I", "1");
+            
+            // Ajustement dynamique si la chaîne générée fait moins de 6 caractères
+            while (code.length() < 6) {
+                code += "X";
+            }
+            
+            return code.substring(0, 6); // Retourne exactement 6 caractères (ex: A6J0B8)
+            
         } catch (NoSuchAlgorithmException e) {
-            // Fallback UUID déterministe (très rare)
-            return String.format("%064x", Math.abs(raw.hashCode()));
+            // Sécurité de repli déterministe basée sur le HashCode
+            long codeLong = Math.abs((long) raw.hashCode());
+            String fallback = Long.toString(codeLong, 36).toUpperCase();
+            fallback = fallback.replace("O", "0").replace("I", "1") + "XXXXXX";
+            return fallback.substring(0, 6);
         }
     }
 

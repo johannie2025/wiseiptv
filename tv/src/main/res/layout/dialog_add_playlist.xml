@@ -16,6 +16,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="Nom de la playlist" 
+            android:textColor="#FFFFFF"
+            android:textColorHint="#88FFFFFF"
             android:layout_marginBottom="16dp"
             android:focusable="true"
             android:nextFocusDown="@+id/rb_m3u_url" />
@@ -40,17 +42,19 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" 
                 android:text="URL M3U" 
+                android:textColor="#FFFFFF"
                 android:checked="true"
                 android:focusable="true"
                 android:nextFocusUp="@+id/et_playlist_name"
                 android:nextFocusRight="@+id/rb_m3u_file"
-                android:nextFocusDown="@+id/et_m3u_url" />
+                android:nextFocusDown="@+id/et_playlist_url" />
                 
             <RadioButton 
                 android:id="@+id/rb_m3u_file" 
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" 
                 android:text="Fichier local" 
+                android:textColor="#FFFFFF"
                 android:layout_marginStart="16dp"
                 android:focusable="true"
                 android:nextFocusUp="@+id/et_playlist_name"
@@ -63,6 +67,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" 
                 android:text="Xtream" 
+                android:textColor="#FFFFFF"
                 android:layout_marginStart="16dp"
                 android:focusable="true"
                 android:nextFocusUp="@+id/et_playlist_name"
@@ -78,10 +83,12 @@
             android:visibility="visible">
             
             <EditText 
-                android:id="@+id/et_m3u_url"
+                android:id="@+id/et_playlist_url"
                 android:layout_width="match_parent" 
                 android:layout_height="wrap_content"
                 android:hint="URL M3U : http://..." 
+                android:textColor="#FFFFFF"
+                android:textColorHint="#88FFFFFF"
                 android:inputType="textUri"
                 android:focusable="true"
                 android:nextFocusUp="@+id/rb_m3u_url"
@@ -89,7 +96,7 @@
         </LinearLayout>
 
         <LinearLayout 
-            android:id="@+id/layout_m3u_file"
+            android:id="@+id/layout_file"
             android:layout_width="match_parent" 
             android:layout_height="wrap_content"
             android:orientation="vertical" 
@@ -101,6 +108,7 @@
                 android:layout_width="match_parent" 
                 android:layout_height="wrap_content"
                 android:text="Aucun fichier sélectionné" 
+                android:textColor="#88FFFFFF"
                 android:textStyle="italic"
                 android:layout_marginBottom="8dp"/>
                 
@@ -128,6 +136,8 @@
                 android:layout_width="match_parent" 
                 android:layout_height="wrap_content"
                 android:hint="Serveur : http://..." 
+                android:textColor="#FFFFFF"
+                android:textColorHint="#88FFFFFF"
                 android:inputType="textUri"
                 android:layout_marginBottom="8dp"
                 android:focusable="true"
@@ -139,6 +149,8 @@
                 android:layout_width="match_parent" 
                 android:layout_height="wrap_content"
                 android:hint="Nom d'utilisateur" 
+                android:textColor="#FFFFFF"
+                android:textColorHint="#88FFFFFF"
                 android:layout_marginBottom="8dp"
                 android:focusable="true"
                 android:nextFocusUp="@+id/et_xtream_server"
@@ -149,6 +161,8 @@
                 android:layout_width="match_parent" 
                 android:layout_height="wrap_content"
                 android:hint="Mot de passe" 
+                android:textColor="#FFFFFF"
+                android:textColorHint="#88FFFFFF"
                 android:inputType="textPassword"
                 android:focusable="true"
                 android:nextFocusUp="@+id/et_xtream_user"
@@ -160,10 +174,11 @@
             android:layout_width="match_parent" 
             android:layout_height="wrap_content"
             android:hint="URL EPG (optionnel) : http://..." 
+            android:textColor="#FFFFFF"
+            android:textColorHint="#88FFFFFF"
             android:inputType="textUri"
             android:layout_marginTop="12dp"
-            android:focusable="true"
-            android:nextFocusDown="@+id/btn_save_playlist" />
+            android:focusable="true" />
 
     </LinearLayout>
 </ScrollView>
