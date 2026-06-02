@@ -47,7 +47,7 @@ public class ActivationManager {
         });
     }
 
-    private static void upsertActivationPlaylist(Context ctx, AppDatabase db,
+    public static void upsertActivationPlaylist(Context ctx, AppDatabase db,
                                                   DeviceSecurity.ActivationResult r) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long existingId = prefs.getLong("playlist_id", -1);
