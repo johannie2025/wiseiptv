@@ -4,9 +4,19 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <SearchView android:id="@+id/search_view"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:iconifiedByDefault="false" android:queryHint="Rechercher…"/>
+    <!-- <SearchView android:id="@+id/search_view" -->
+        <!-- android:layout_width="match_parent" android:layout_height="wrap_content" -->
+        <!-- android:iconifiedByDefault="false" android:queryHint="Rechercher…"/> -->
+		
+		<androidx.appcompat.widget.SearchView
+    android:id="@+id/search_view"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:iconifiedByDefault="false"
+    android:queryHint="Rechercher une chaîne..."
+    
+    app:theme="@style/SearchViewStyle"
+    android:theme="@style/SearchViewStyle" />
 
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tab_layout"
