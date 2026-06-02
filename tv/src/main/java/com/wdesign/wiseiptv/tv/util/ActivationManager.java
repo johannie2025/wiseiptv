@@ -54,21 +54,21 @@ public class ActivationManager {
         PlaylistEntity pl = (pid > 0) ? db.playlistDao().findById(pid) : null;
         if (pl == null) {
             pl = new PlaylistEntity();
-            // Si pid == 0, Room générera automatiquement un ID unique lors de l'insert
             if (pid > 0) {
                 pl.id = pid; 
             }
         }
 
         pl.name = "Abonnement IPTV (Actif)";
-        pl.type = "XTREAM"; // CORRECTION : Type en String pour correspondre au Core / Room
+        pl.type = 2; // CORRECT : Rétabli en int (ex: 2 pour Xtream/API)
         
-        // CORRECTION : Utilisation des champs existants de PlaylistEntity et ActivationResult
-        pl.url = r.url;       // ou r.server selon la structure exacte définie dans votre package core
+        // CORRECT : Utilise le DNS principal exposé par la classe d'activation
+        pl.serverUrl = r.primaryDns(); 
+        
         pl.username = r.login;
         pl.password = r.password;
         pl.isActive = true;
-        pl.lastUpdated = System.currentTimeMillis(); // Préférable à 0 pour le suivi de synchronisation
+        pl.lastUpdated = System.currentTimeMillis();
 
         if (pl.id == 0) {
             pl.id = db.playlistDao().insert(pl);
@@ -77,20 +77,20 @@ public class ActivationManager {
             db.playlistDao().update(pl);
         }
 
-        // CORRECTION : Alignement du Callback anonyme avec l'interface de PlaylistLoader
+        // CORRECT : Réalignement avec les signatures d'origine de votre Callback
         PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
-            @Override
-            public void onSuccess() {
-                // Flux chargés ou mis à jour avec succès en arrière-plan
+            @Override 
+            public void onDone(int count) {
+                Log.d(TAG, "Flux chargés avec succès : " + count);
             }
-
-            @Override
-            public void onFailure(Exception e) {
-                // Gestion de l'échec de parsing de l'abonnement
+            
+            @Override 
+            public void onError(String msg) {
+                Log.e(TAG, "Erreur de chargement des flux : " + msg);
             }
         });
     }
-
+	
     private static void purgeActivationPlaylists(Context ctx, AppDatabase db) {
         SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         long pid = prefs.getLong("playlist_id", -1);

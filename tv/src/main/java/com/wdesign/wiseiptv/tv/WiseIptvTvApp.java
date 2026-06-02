@@ -27,8 +27,7 @@ public class WiseIptvTvApp extends Application {
         ActivationManager.checkAndSync(this, new ActivationManager.OnResult() {
             @Override 
             public void onActivated(DeviceSecurity.ActivationResult r) {
-                Log.d(TAG, "Téléviseur/Box activé avec succès. URL: " + r.url);
-                // La playlist d'activation est gérée et injectée de manière transparente
+                Log.d(TAG, "Téléviseur/Box activé avec succès. DNS: " + r.primaryDns());
             }
 
             @Override 
