@@ -19,7 +19,6 @@ import java.util.Locale;
 
 /**
  * ActivationActivity — PREMIER ÉCRAN de l'APK Mobile.
- * Corrigé : Attend la fin du téléchargement avant de rediriger vers l'accueil.
  */
 public class ActivationActivity extends AppCompatActivity {
 
@@ -95,9 +94,10 @@ public class ActivationActivity extends AppCompatActivity {
             @Override
             public void onActive(DeviceSecurity.ActivationResult r) {
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return; // Protection contre le crash
                     saveActivationState(r);
                     showActive(r);
-                    // Au démarrage, on télécharge tranquillement en tâche de fond sans forcer la redirection
+                    // Au démarrage automatique, on peut lancer en tâche de fond tranquillement
                     triggerDownloadAndRedirect(r, false);
                 });
             }
@@ -105,6 +105,7 @@ public class ActivationActivity extends AppCompatActivity {
             @Override
             public void onInactive(String status, String message) {
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
                     setLoading(false, "");
                     clearActivationState();
                     showInactive(status);
@@ -114,6 +115,7 @@ public class ActivationActivity extends AppCompatActivity {
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
                     setLoading(false, "");
                     SharedPreferences prefs = getSharedPreferences(PREFS_ACTIVATION, Context.MODE_PRIVATE);
                     if ("ACTIVE".equals(prefs.getString("status", ""))) {
@@ -127,22 +129,29 @@ public class ActivationActivity extends AppCompatActivity {
     }
 
     private void checkActivation(boolean launchImmediatelyOnSuccess) {
-        setLoading(true, launchImmediatelyOnSuccess ? "Téléchargement de la playlist…" : "Vérification…");
+        // Si l'utilisateur clique sur "Accéder au contenu" (launchImmediatelyOnSuccess = true),
+        // on ne charge rien ici, on fonce directement vers la MainActivity pour éviter tout freeze/crash.
+        if (launchImmediatelyOnSuccess) {
+            goToMain();
+            return;
+        }
+
+        setLoading(true, "Vérification…");
         DeviceSecurity.check(this, new DeviceSecurity.Callback() {
             @Override
             public void onActive(DeviceSecurity.ActivationResult r) {
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
                     saveActivationState(r);
                     showActive(r);
-                    
-                    // On passe le flag pour savoir s'il faut rediriger à la fin du téléchargement
-                    triggerDownloadAndRedirect(r, launchImmediatelyOnSuccess);
+                    triggerDownloadAndRedirect(r, false);
                 });
             }
 
             @Override
             public void onInactive(String status, String message) {
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
                     setLoading(false, "");
                     clearActivationState();
                     showInactive(status);
@@ -153,6 +162,7 @@ public class ActivationActivity extends AppCompatActivity {
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
                     setLoading(false, "");
                     Toast.makeText(ActivationActivity.this, "Erreur réseau : " + message, Toast.LENGTH_SHORT).show();
                 });
@@ -171,23 +181,25 @@ public class ActivationActivity extends AppCompatActivity {
         getSharedPreferences(PREFS_ACTIVATION, Context.MODE_PRIVATE).edit().clear().apply();
     }
 
-    /**
-     * Gère le téléchargement de manière sécurisée et n'ouvre l'application que si tout est prêt localement.
-     */
-private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boolean redirectOnSuccess) {
-    if (redirectOnSuccess) {
-        // On ouvre l'application immédiatement sans attendre !
-        goToMain();
-    } else {
-        // Si c'est la vérification automatique du démarrage, on peut lancer le chargement 
-        // en arrière-plan sans bloquer l'interface
+    private void triggerDownloadAndRedirect(DeviceSecurity.ActivationResult r, boolean redirectOnSuccess) {
+        if (redirectOnSuccess) {
+            goToMain();
+            return;
+        }
+        
+        // Mode tâche de fond uniquement (au démarrage automatique de l'app)
         AppDatabase db = AppDatabase.get(this);
         ActivationManager.downloadAllPlaylistsAsync(getApplicationContext(), db, r, new ActivationManager.OnDownloadCallback() {
-            @Override public void onSuccess() { android.util.Log.d("Activation", "Sync auto réussie"); }
-            @Override public void onFailure(String msg) { android.util.Log.e("Activation", "Sync auto échec: " + msg); }
+            @Override 
+            public void onSuccess() {
+                android.util.Log.d("ActivationActivity", "Synchronisation automatique en tâche de fond terminée.");
+            }
+            @Override 
+            public void onFailure(String msg) {
+                android.util.Log.e("ActivationActivity", "Échec sync tâche de fond: " + msg);
+            }
         });
     }
-}
 
     private boolean isExpired(String dateStr) {
         try {
