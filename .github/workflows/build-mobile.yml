@@ -117,7 +117,7 @@ jobs:
             ```
 
   # ── Job 2 : Test sur émulateur + capture logcat ───────────────────────────
- - name: Run App and Simulate UI Interaction
+      - name: Run App and Simulate UI Interaction
         run: |
           echo "=== Liste des packages installés (Vérification) ==="
           adb shell pm list packages | grep wdesign || true
