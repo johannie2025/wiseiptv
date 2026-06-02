@@ -175,6 +175,7 @@ public class ActivationManager {
             .putString("status", "ACTIVE")
             .putString("expires_at", r.expiresAt)
             .putString("login", r.login)
+            .putString("password", r.password)
             .apply();
     }
 

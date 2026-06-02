@@ -12,113 +12,193 @@ import com.google.android.material.tabs.TabLayout;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
+import com.wdesign.wiseiptv.core.security.DeviceSecurity;
 import com.wdesign.wiseiptv.mobile.R;
 import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
+import com.wdesign.wiseiptv.mobile.util.ActivationManager;
 import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 
+/**
+ * MainActivity — Écran principal après activation.
+ *
+ * CORRECTIONS :
+ *  1. Reçoit l'ActivationResult depuis ActivationActivity via extras Intent.
+ *     → Pas de deuxième appel réseau DeviceSecurity.check(), pas de deadlock Room.
+ *  2. Si les extras sont absents (retour depuis Settings, rotation, etc.) :
+ *     → Reconstruit un ActivationResult depuis les SharedPreferences (mode cache).
+ *     → Si le cache est absent → refreshStaleIfNeeded() pour les playlists manuelles.
+ *  3. Le téléchargement se fait dans downloadAllPlaylistsAsync() (ActivationManager)
+ *     qui est déjà thread-safe et séquentiel (pas de transactions parallèles).
+ *  4. WiseApp ne fait plus checkAndSync() → suppression du double appel.
+ */
 public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
-    private RecyclerView rvChannels;
-    private ChannelAdapter adapter;
-    private ProgressBar progressBar;
-    private TextView tvEmpty;
-    private TabLayout tabLayout;
+    // Extras transmis par ActivationActivity
+    public static final String EXTRA_ACT_LOGIN       = "act_login";
+    public static final String EXTRA_ACT_PASSWORD    = "act_password";
+    public static final String EXTRA_ACT_EXPIRES     = "act_expires";
+    public static final String EXTRA_ACT_DNS_URLS    = "act_dns_urls";
+    public static final String EXTRA_ACT_DNS_EPG_URLS= "act_dns_epg_urls";
+
+    private RecyclerView        rvChannels;
+    private ChannelAdapter      adapter;
+    private ProgressBar         progressBar;
+    private TextView            tvEmpty;
+    private TabLayout           tabLayout;
     private BottomNavigationView bottomNav;
-    private SearchView searchView;
-    private Spinner spinnerGroup;
-    private AppDatabase db;
-    private int currentTab = 0;         // 0=All,1=Live,2=Films,3=Series,4=Fav
-    private String currentGroup = null; // null = tous les groupes
-	
-@Override 
+    private SearchView          searchView;
+    private Spinner             spinnerGroup;
+    private AppDatabase         db;
+    private int    currentTab   = 0;
+    private String currentGroup = null;
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        
-        db          = AppDatabase.get(this);
-        rvChannels  = findViewById(R.id.rv_channels);
-        progressBar = findViewById(R.id.progress_bar);
-        tvEmpty     = findViewById(R.id.tv_empty);
-        tabLayout   = findViewById(R.id.tab_layout);
-        bottomNav   = findViewById(R.id.bottom_nav);
-        searchView  = findViewById(R.id.search_view);
-        spinnerGroup= findViewById(R.id.spinner_group);
+
+        db           = AppDatabase.get(this);
+        rvChannels   = findViewById(R.id.rv_channels);
+        progressBar  = findViewById(R.id.progress_bar);
+        tvEmpty      = findViewById(R.id.tv_empty);
+        tabLayout    = findViewById(R.id.tab_layout);
+        bottomNav    = findViewById(R.id.bottom_nav);
+        searchView   = findViewById(R.id.search_view);
+        spinnerGroup = findViewById(R.id.spinner_group);
 
         adapter = new ChannelAdapter(this);
-        // Utilisation d'un Grid de 3 colonnes adapté au mobile
         rvChannels.setLayoutManager(new GridLayoutManager(this, 3));
         rvChannels.setAdapter(adapter);
 
-        setupTabs(); 
-        setupSearch(); 
-        setupBottomNav(); 
+        setupTabs();
+        setupSearch();
+        setupBottomNav();
         setupGroupSpinner();
 
-        // ─── TÉLÉCHARGEMENT TRANSPARENT EN ARRIÈRE-PLAN ───
-        
-        // 1. On affiche la barre de chargement directement sur la page principale ouverte
-        if (progressBar != null) {
-            progressBar.setVisibility(View.VISIBLE);
-        }
-
-        // 2. On charge immédiatement le cache local existant pour que l'utilisateur voit déjà les chaînes s'il y en a
+        // Affiche immédiatement les chaînes déjà en cache (bonne UX)
         observeCurrentTab();
 
-        // 3. Interrogation asynchrone sécurisée du serveur d'activation pour lancer la mise à jour
-        com.wdesign.wiseiptv.core.security.DeviceSecurity.check(this, new com.wdesign.wiseiptv.core.security.DeviceSecurity.Callback() {
-            @Override
-            public void onActive(com.wdesign.wiseiptv.core.security.DeviceSecurity.ActivationResult r) {
-                // Lance le téléchargement récursif asynchrone (non bloquant) de tous les serveurs DNS actifs
-                com.wdesign.wiseiptv.mobile.util.ActivationManager.downloadAllPlaylistsAsync(
-                    getApplicationContext(), 
-                    db, 
-                    r, 
-                    new com.wdesign.wiseiptv.mobile.util.ActivationManager.OnDownloadCallback() {
-                        @Override
-                        public void onSuccess() {
-                            // Téléchargement de tous les serveurs achevé avec succès
-                            runOnUiThread(() -> {
-                                if (progressBar != null) progressBar.setVisibility(View.GONE);
-                                observeCurrentTab(); // Rafraîchit le catalogue à l'écran
-                                Toast.makeText(MainActivity.this, "Chaînes synchronisées !", Toast.LENGTH_SHORT).show();
-                            });
-                        }
-
-                        @Override
-                        public void onFailure(String msg) {
-                            // Un ou plusieurs serveurs ont échoué, on masque le loader et on reste sur les données locales
-                            runOnUiThread(() -> {
-                                if (progressBar != null) progressBar.setVisibility(View.GONE);
-                                observeCurrentTab();
-                            });
-                        }
-                    }
-                );
-            }
-
-            @Override
-            public void onInactive(String status, String message) {
-                // Appareil coupé ou expiré sur le panel
-                runOnUiThread(() -> {
-                    if (progressBar != null) progressBar.setVisibility(View.GONE);
-                    Toast.makeText(MainActivity.this, "Abonnement inactif ou expiré.", Toast.LENGTH_LONG).show();
-                });
-            }
-
-            @Override
-            public void onError(String message) {
-                // Mode hors-ligne (Pas de réseau) : On retire le loader, l'utilisateur profite du cache local
-                runOnUiThread(() -> {
-                    if (progressBar != null) progressBar.setVisibility(View.GONE);
-                });
-            }
-        });
+        // Lance le téléchargement en arrière-plan avec l'ActivationResult reçu
+        startBackgroundSync();
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Téléchargement arrière-plan
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Reconstruit l'ActivationResult depuis les extras Intent (chemin normal)
+     * ou depuis les SharedPreferences (cache / retour arrière).
+     * Puis lance downloadAllPlaylistsAsync() qui est séquentiel et thread-safe.
+     */
+    private void startBackgroundSync() {
+        Intent intent = getIntent();
+
+        // ── Chemin 1 : extras frais reçus depuis ActivationActivity ──────────
+        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
+        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
+        String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
+        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
+        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
+
+        if (login != null && dnsUrls != null && dnsUrls.length > 0) {
+            List<DeviceSecurity.DnsEntry> dnsEntries = new ArrayList<>();
+            for (int i = 0; i < dnsUrls.length; i++) {
+                String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length) ? dnsEpgUrls[i] : "";
+                dnsEntries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
+            }
+            DeviceSecurity.ActivationResult result =
+                    new DeviceSecurity.ActivationResult(
+                            DeviceSecurity.getOrCreateKey(this),
+                            login, password, expires != null ? expires : "", dnsEntries);
+            launchDownload(result);
+            return;
+        }
+
+        // ── Chemin 2 : pas d'extras (rotation, retour depuis Settings…) ──────
+        // Reconstruction depuis les SharedPreferences sauvegardées par ActivationManager
+        SharedPreferences prefs = getSharedPreferences("wise_activation", Context.MODE_PRIVATE);
+        String savedStatus  = prefs.getString("status", "UNKNOWN");
+        String savedLogin   = prefs.getString("login", null);
+        String savedExpires = prefs.getString("expires_at", "");
+
+        if ("ACTIVE".equals(savedStatus) && savedLogin != null) {
+            // Chercher les playlists d'activation existantes en BDD pour reconstruire les DNS
+            Executors.newSingleThreadExecutor().execute(() -> {
+                List<PlaylistEntity> all = db.playlistDao().getAllSync();
+                List<DeviceSecurity.DnsEntry> dnsEntries = new ArrayList<>();
+                for (PlaylistEntity pl : all) {
+                    if (pl.isActive && pl.type == PlaylistEntity.TYPE_XTREAM) {
+                        dnsEntries.add(new DeviceSecurity.DnsEntry(pl.url, "", dnsEntries.size()));
+                    }
+                }
+                if (!dnsEntries.isEmpty()) {
+                    String pass = prefs.getString("password", ""); // Optionnel si stocké
+                    DeviceSecurity.ActivationResult result =
+                            new DeviceSecurity.ActivationResult(
+                                    DeviceSecurity.getOrCreateKey(this),
+                                    savedLogin, pass, savedExpires, dnsEntries);
+                    // Ne retélécharge que si stale (> 7j)
+                    boolean anyStale = false;
+                    for (PlaylistEntity pl : all) {
+                        if (pl.isActive && PlaylistLoader.needsRefresh(pl)) { anyStale = true; break; }
+                    }
+                    if (anyStale) {
+                        runOnUiThread(() -> launchDownload(result));
+                    }
+                } else {
+                    // Aucune playlist d'activation → fallback playlists manuelles
+                    PlaylistLoader.refreshStaleIfNeeded(db, null);
+                }
+            });
+            return;
+        }
+
+        // ── Chemin 3 : pas de cache d'activation → playlists manuelles ───────
+        PlaylistLoader.refreshStaleIfNeeded(db, null);
+    }
+
+    /**
+     * Lance le téléchargement arrière-plan de toutes les playlists du résultat
+     * et gère l'affichage de la barre de progression.
+     */
+    private void launchDownload(DeviceSecurity.ActivationResult result) {
+        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+
+        ActivationManager.downloadAllPlaylistsAsync(
+                getApplicationContext(), db, result,
+                new ActivationManager.OnDownloadCallback() {
+                    @Override
+                    public void onSuccess() {
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
+                            observeCurrentTab();
+                            Toast.makeText(MainActivity.this,
+                                    "✅ Chaînes synchronisées !", Toast.LENGTH_SHORT).show();
+                        });
+                    }
+
+                    @Override
+                    public void onFailure(String msg) {
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
+                            // On reste sur le cache silencieusement
+                        });
+                    }
+                });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // UI — Tabs / Search / BottomNav / Spinner
+    // ─────────────────────────────────────────────────────────────────────────
+
     private void setupTabs() {
-        String[] tabs = {"Tout","Live","Films","Séries","Favoris"};
+        String[] tabs = {"Tout", "Live", "Films", "Séries", "Favoris"};
         for (String t : tabs) tabLayout.addTab(tabLayout.newTab().setText(t));
         tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override public void onTabSelected(TabLayout.Tab t) {
@@ -141,11 +221,9 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     private void updateGroupSpinner(List<String> groups) {
         if (spinnerGroup == null) return;
-        if (groups == null || groups.isEmpty()) {
-            spinnerGroup.setVisibility(View.GONE); return;
-        }
+        if (groups == null || groups.isEmpty()) { spinnerGroup.setVisibility(View.GONE); return; }
         spinnerGroup.setVisibility(View.VISIBLE);
-        java.util.ArrayList<String> items = new java.util.ArrayList<>();
+        ArrayList<String> items = new ArrayList<>();
         items.add("Tous les groupes");
         items.addAll(groups);
         ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, items);
@@ -164,7 +242,6 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     private void observeCurrentTab() {
         if (currentGroup != null) {
-            // Filtre par groupe
             switch (currentTab) {
                 case 1: db.channelDao().getLiveByGroup(currentGroup).observe(this, this::updateList); return;
                 case 2: db.channelDao().getFilmsByGroup(currentGroup).observe(this, this::updateList); return;
@@ -172,20 +249,22 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             }
         }
         switch (currentTab) {
-            case 0: db.channelDao().getAll().observe(this, this::updateList); break;
-            case 1: db.channelDao().getLive().observe(this, this::updateList); break;
-            case 2: db.channelDao().getFilms().observe(this, this::updateList); break;
-            case 3: db.channelDao().getSeries().observe(this, this::updateList); break;
+            case 0: db.channelDao().getAll().observe(this, this::updateList);       break;
+            case 1: db.channelDao().getLive().observe(this, this::updateList);      break;
+            case 2: db.channelDao().getFilms().observe(this, this::updateList);     break;
+            case 3: db.channelDao().getSeries().observe(this, this::updateList);    break;
             case 4: db.channelDao().getFavorites().observe(this, this::updateList); break;
         }
     }
 
     private void updateList(List<ChannelEntity> list) {
         adapter.setData(list);
-        tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
+        if (tvEmpty != null)
+            tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
     private void setupSearch() {
+        if (searchView == null) return;
         searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override public boolean onQueryTextSubmit(String q) { return false; }
             @Override public boolean onQueryTextChange(String q) {
@@ -197,6 +276,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     }
 
     private void setupBottomNav() {
+        if (bottomNav == null) return;
         bottomNav.setOnItemSelectedListener(item -> {
             int id = item.getItemId();
             if      (id == R.id.nav_home)    { observeCurrentTab(); return true; }
@@ -205,6 +285,10 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             return false;
         });
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Ajout manuel de playlist
+    // ─────────────────────────────────────────────────────────────────────────
 
     public void showAddPlaylistDialog() {
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
@@ -220,17 +304,17 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
         rgType.setOnCheckedChangeListener((g, checked) -> {
             boolean isXtream = checked == R.id.rb_xtream;
-            layoutXtream.setVisibility(isXtream ? android.view.View.VISIBLE : android.view.View.GONE);
-            etUrl.setVisibility(isXtream ? android.view.View.GONE : android.view.View.VISIBLE);
+            layoutXtream.setVisibility(isXtream ? View.VISIBLE : View.GONE);
+            etUrl.setVisibility(isXtream ? View.GONE : View.VISIBLE);
         });
 
         b.setView(v);
         b.setPositiveButton("Charger", (d, w) -> {
-            String name = etName.getText().toString().trim();
-            int checkedId = rgType.getCheckedRadioButtonId();
+            String name     = etName.getText().toString().trim();
+            int    checkedId = rgType.getCheckedRadioButtonId();
             PlaylistEntity pl = new PlaylistEntity();
-            pl.name = name.isEmpty() ? "Playlist" : name;
-            pl.lastUpdated = 0; // Force le premier chargement
+            pl.name        = name.isEmpty() ? "Playlist" : name;
+            pl.lastUpdated = 0;
 
             if (checkedId == R.id.rb_xtream) {
                 String server = etServer.getText().toString().trim();
@@ -247,20 +331,20 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 pl.url = url;
             }
 
-            progressBar.setVisibility(android.view.View.VISIBLE);
+            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
             Executors.newSingleThreadExecutor().execute(() -> {
                 pl.id = db.playlistDao().insert(pl);
                 PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
                     @Override public void onDone(int count) {
                         runOnUiThread(() -> {
-                            progressBar.setVisibility(android.view.View.GONE);
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
                             observeCurrentTab();
                             Toast.makeText(MainActivity.this, count + " chaînes chargées", Toast.LENGTH_SHORT).show();
                         });
                     }
                     @Override public void onError(String msg) {
                         runOnUiThread(() -> {
-                            progressBar.setVisibility(android.view.View.GONE);
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
                             Toast.makeText(MainActivity.this, "Erreur : " + msg, Toast.LENGTH_LONG).show();
                         });
                     }
@@ -273,10 +357,10 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     @Override public void onClick(ChannelEntity ch) {
         Intent i = new Intent(this, PlayerActivity.class);
-        i.putExtra(PlayerActivity.EXTRA_ID, ch.id);
-        i.putExtra(PlayerActivity.EXTRA_NAME, ch.name);
-        i.putExtra(PlayerActivity.EXTRA_URL, ch.streamUrl);
-        i.putExtra(PlayerActivity.EXTRA_TYPE, ch.contentType);
+        i.putExtra(PlayerActivity.EXTRA_ID,    ch.id);
+        i.putExtra(PlayerActivity.EXTRA_NAME,  ch.name);
+        i.putExtra(PlayerActivity.EXTRA_URL,   ch.streamUrl);
+        i.putExtra(PlayerActivity.EXTRA_TYPE,  ch.contentType);
         i.putExtra(PlayerActivity.EXTRA_GROUP, ch.groupTitle);
         i.putExtra(PlayerActivity.EXTRA_ORDER, ch.sortOrder);
         startActivity(i);

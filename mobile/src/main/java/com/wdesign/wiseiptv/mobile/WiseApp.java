@@ -2,9 +2,18 @@ package com.wdesign.wiseiptv.mobile;
 
 import android.app.Application;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
-import com.wdesign.wiseiptv.mobile.util.ActivationManager;
-import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
 
+/**
+ * WiseApp — Application singleton.
+ *
+ * CORRECTION : checkAndSync() a été retiré d'ici.
+ * Il causait un double appel réseau + double transaction Room en parallèle avec
+ * celui de MainActivity, provoquant des deadlocks et des crashes aléatoires.
+ *
+ * Le seul déclencheur du téléchargement est désormais MainActivity.startBackgroundSync(),
+ * qui reçoit l'ActivationResult directement depuis ActivationActivity via extras Intent.
+ * WiseApp se contente d'initialiser la BDD pour qu'elle soit prête dès le démarrage.
+ */
 public class WiseApp extends Application {
     private static WiseApp instance;
     public static WiseApp get() { return instance; }
@@ -12,21 +21,7 @@ public class WiseApp extends Application {
     @Override public void onCreate() {
         super.onCreate();
         instance = this;
-        AppDatabase db = AppDatabase.get(this);
-
-        // 1. Vérifier l'activation sur le panel
-        ActivationManager.checkAndSync(this, new ActivationManager.OnResult() {
-            @Override public void onActivated(com.wdesign.wiseiptv.core.security.DeviceSecurity.ActivationResult r) {
-                // Playlist d'activation mise à jour automatiquement
-            }
-            @Override public void onExpired(String status) {
-                // Playlists supprimées par ActivationManager
-                android.util.Log.w("WiseApp", "Activation expirée: " + status);
-            }
-            @Override public void onError(String msg) {
-                // Pas de réseau → refresh hebdomadaire classique
-                PlaylistLoader.refreshStaleIfNeeded(db, null);
-            }
-        });
+        // Pré-initialiser la BDD en arrière-plan pour réduire la latence au premier accès
+        AppDatabase.get(this);
     }
 }
