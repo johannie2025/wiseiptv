@@ -24,7 +24,13 @@ import java.util.List;
 import java.util.concurrent.Executors;
 
 /**
- * MainActivity — Corrigée pour éliminer les 16 erreurs de compilation Javac.
+ * MainActivity
+ *
+ * CORRECTIONS DE COMPILATION & STABILITÉ :
+ * 1. Alignement strict avec les méthodes réelles de ChannelDao (getLiveGroups, getLive, getAll, etc.).
+ * 2. Utilisation de la méthode de mise à jour native de ton adapter : adapter.setData(list).
+ * 3. FIX DU CRASH DES OBSERVERS : Un seul observer actif à la fois grâce à removeObserver().
+ * 4. Alignement avec l'absence de callback de téléchargement asynchrone direct (ou gestion via Room/UI).
  */
 public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
@@ -47,10 +53,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private int    currentTab   = 0;
     private String currentGroup = null;
 
-    // FIX INT TYPE : Utilisation d'un type primitif entier pour correspondre à ChannelEntity
-    private int currentContentType = ChannelEntity.TYPE_LIVE;
-
-    // Un seul observer actif à la fois pour éviter les ANR / Fuites mémoire
+    // ── FIX : Références pour maintenir un unique observer actif à la fois ──
     private LiveData<List<ChannelEntity>>  currentLiveData;
     private Observer<List<ChannelEntity>>  currentObserver;
     private LiveData<List<String>>          currentGroupLiveData;
@@ -78,12 +81,16 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         setupSearch();
         setupBottomNav();
 
-        // Affichage immédiat du cache local
+        // Affiche immédiatement le cache local de Room
         observeCurrentTab();
 
-        // Synchronisation en tâche de fond
+        // Lancement de la vérification/synchronisation arrière-plan
         startBackgroundSync();
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GESTION SÉCURISÉE DES OBSERVERS (Évite les fuites et les crashs ANR)
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void observeChannels(LiveData<List<ChannelEntity>> liveData) {
         if (currentLiveData != null && currentObserver != null) {
@@ -104,37 +111,29 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     }
 
     private void observeCurrentTab() {
-        // Sélection du type de contenu selon l'onglet actuel
+        // 1. Chargement des groupes selon l'onglet (Appels DAO d'origine reconnus)
         switch (currentTab) {
-            case 1: currentContentType = ChannelEntity.TYPE_LIVE; break;
-            case 2: currentContentType = ChannelEntity.TYPE_VOD; break;
-            case 3: currentContentType = ChannelEntity.TYPE_SERIES; break;
-            default: currentContentType = ChannelEntity.TYPE_LIVE; break;
+            case 1: observeGroups(db.channelDao().getLiveGroups());   break;
+            case 2: observeGroups(db.channelDao().getFilmGroups());   break;
+            case 3: observeGroups(db.channelDao().getSeriesGroups()); break;
+            default: updateGroupSpinner(null); break;
         }
 
-        // Chargement des groupes filtrés par le type de contenu
-        switch (currentTab) {
-            case 1: case 2: case 3:
-                observeGroups(db.channelDao().getGroups(currentContentType));
-                break;
-            default:
-                updateGroupSpinner(null);
-                break;
-        }
-
-        // Filtrage des chaînes par groupe sélectionné ou par type global
+        // 2. Filtrage par groupe si sélectionné
         if (currentGroup != null) {
-            if (currentTab >= 1 && currentTab <= 3) {
-                observeChannels(db.channelDao().getChannelsByGroup(currentContentType, currentGroup));
-                return;
+            switch (currentTab) {
+                case 1: observeChannels(db.channelDao().getLiveByGroup(currentGroup));  return;
+                case 2: observeChannels(db.channelDao().getFilmsByGroup(currentGroup)); return;
+                case 3: observeChannels(db.channelDao().getSeriesByGroup(currentGroup));return;
             }
         }
 
+        // 3. Filtrage global par onglet par défaut
         switch (currentTab) {
-            case 0: observeChannels(db.channelDao().getAllChannels()); break;
-            case 1: case 2: case 3:
-                observeChannels(db.channelDao().getChannels(currentContentType));
-                break;
+            case 0: observeChannels(db.channelDao().getAll());       break;
+            case 1: observeChannels(db.channelDao().getLive();      break;
+            case 2: observeChannels(db.channelDao().getFilms());     break;
+            case 3: observeChannels(db.channelDao().getSeries());    break;
             case 4: observeChannels(db.channelDao().getFavorites()); break;
         }
     }
@@ -144,6 +143,10 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         if (tvEmpty != null)
             tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SYNCHRONISATION ET CHARGEMENT
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void startBackgroundSync() {
         Intent intent = getIntent();
@@ -199,25 +202,17 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private void launchDownload(DeviceSecurity.ActivationResult result) {
         if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
 
-        ActivationManager.downloadAllPlaylistsAsync(
-            getApplicationContext(), db, result,
-            new ActivationManager.OnDownloadCallback() {
-                @Override public void onSuccess() {
-                    runOnUiThread(() -> {
-                        if (isFinishing() || isDestroyed()) return;
-                        if (progressBar != null) progressBar.setVisibility(View.GONE);
-                        observeCurrentTab();
-                        Toast.makeText(MainActivity.this, "✅ Chaînes synchronisées !", Toast.LENGTH_SHORT).show();
-                    });
-                }
-                @Override public void onFailure(String msg) {
-                    runOnUiThread(() -> {
-                        if (isFinishing() || isDestroyed()) return;
-                        if (progressBar != null) progressBar.setVisibility(View.GONE);
-                    });
-                }
-            });
+        // Correction : L'appel à downloadAllPlaylistsAsync ne prend pas de callback direct de succès/échec
+        // La mise à jour des données se propage de toute manière automatiquement via Room et les LiveData.
+        ActivationManager.downloadAllPlaylistsAsync(getApplicationContext(), db, result);
+        
+        // On masque le progress après l'initialisation du téléchargement asynchrone
+        if (progressBar != null) progressBar.setVisibility(View.GONE);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // COMPOSANTS COMPORTEMENTAUX (TABS / SEARCH / SPINNER)
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void setupTabs() {
         String[] tabs = {"Tout", "Live", "Films", "Séries", "Favoris"};
@@ -278,8 +273,6 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
         b.setTitle("Ajouter une playlist");
         android.view.View v = getLayoutInflater().inflate(R.layout.dialog_add_playlist, null);
-        
-        // FIX IDs : Utilisation des identifiants exacts de dialog_add_playlist.xml
         EditText etName    = v.findViewById(R.id.et_playlist_name);
         EditText etUrl     = v.findViewById(R.id.et_playlist_url);
         EditText etServer  = v.findViewById(R.id.et_xtream_server);
