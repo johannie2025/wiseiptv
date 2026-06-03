@@ -202,34 +202,19 @@ private void observeCurrentTab() {
 private void launchDownload(DeviceSecurity.ActivationResult result) {
     if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
 
-    // ÉVITE LE CRASH : On utilise la méthode checkAndSync qui est réellement 
-    // présente et déclarée dans ton ActivationManager.java
-    ActivationManager.checkAndSync(getApplicationContext(), new ActivationManager.OnResult() {
-        @Override
-        public void onActivated(DeviceSecurity.ActivationResult r) {
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                if (progressBar != null) progressBar.setVisibility(View.GONE);
-                observeCurrentTab(); // Rafraîchit l'affichage avec les chaînes chargées
-                Toast.makeText(MainActivity.this, "✅ Chaînes synchronisées !", Toast.LENGTH_SHORT).show();
-            });
-        }
-
-        @Override
-        public void onExpired(String status) {
-            runOnUiThread(() -> {
-                if (progressBar != null) progressBar.setVisibility(View.GONE);
-                Toast.makeText(MainActivity.this, "❌ Compte expiré ou désactivé", Toast.LENGTH_LONG).show();
-            });
-        }
-
-        @Override
-        public void onError(String msg) {
-            runOnUiThread(() -> {
-                if (progressBar != null) progressBar.setVisibility(View.GONE);
-                Toast.makeText(MainActivity.this, "⚠️ Erreur de synchronisation : " + msg, Toast.LENGTH_LONG).show();
-            });
-        }
+    // On utilise directement le résultat valide transmis par l'ActivationActivity
+    Executors.newSingleThreadExecutor().execute(() -> {
+        ActivationManager.saveAndLoadResult(getApplicationContext(), db, result);
+        
+        // Une fois l'opération lancée, on rafraîchit l'UI sur le Thread Principal
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (progressBar != null) progressBar.setVisibility(View.GONE);
+            
+            // Re-observe Room qui va se mettre à jour automatiquement dès que PlaylistLoader aura fini
+            observeCurrentTab();
+            Toast.makeText(MainActivity.this, "⚡ Synchronisation du contenu lancée...", Toast.LENGTH_SHORT).show();
+        });
     });
 }
 

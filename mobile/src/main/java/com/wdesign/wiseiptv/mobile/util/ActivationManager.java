@@ -99,4 +99,14 @@ public class ActivationManager {
     public static String getSavedStatus(Context ctx) {
         return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("status", "UNKNOWN");
     }
+	
+	public static void saveAndLoadResult(Context ctx, AppDatabase db, DeviceSecurity.ActivationResult r) {
+    Executors.newSingleThreadExecutor().execute(() -> {
+        // 1. Sauvegarde le statut et les infos en SharedPreferences
+        saveActivationPrefs(ctx, r);
+        // 2. Insère ou met à jour la playlist d'activation dans la base Room et lance le Loader
+        upsertActivationPlaylist(ctx, db, r);
+    });
+}
+	
 }
