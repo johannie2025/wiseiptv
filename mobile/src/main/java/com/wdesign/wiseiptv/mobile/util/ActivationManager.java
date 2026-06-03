@@ -235,4 +235,21 @@ public class ActivationManager {
         }
         return sb.toString();
     }
+
+    /**
+     * Alias de compatibilité pour l'ancien appel dans MainActivity.java.
+     * Délègue vers upsertAndDownloadAll.
+     */
+    public static void downloadAllPlaylistsAsync(
+            android.content.Context ctx,
+            com.wdesign.wiseiptv.core.db.AppDatabase db,
+            DeviceSecurity.ActivationResult r,
+            OnDownloadCallback cb) {
+        upsertAndDownloadAll(ctx, db, r, new DownloadCallback() {
+            @Override public void onProgress(String name) {}
+            @Override public void onDone(int total) { if (cb != null) cb.onSuccess(); }
+            @Override public void onError(String msg) { if (cb != null) cb.onFailure(msg); }
+        });
+    }
+
 }

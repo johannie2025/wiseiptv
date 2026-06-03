@@ -1,6 +1,7 @@
 package com.wdesign.wiseiptv.tv;
 
 import android.app.Application;
+import android.preference.PreferenceManager;
 import android.util.Log;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
@@ -32,5 +33,15 @@ public class WiseIptvTvApp extends Application {
                 PlaylistLoader.refreshStaleIfNeeded(db, null);
             }
         });
+    }
+
+    public String getPlaylistUrl() {
+        return PreferenceManager.getDefaultSharedPreferences(this)
+            .getString("playlist_url", "");
+    }
+
+    public void savePlaylistUrl(String url) {
+        PreferenceManager.getDefaultSharedPreferences(this).edit()
+            .putString("playlist_url", url).apply();
     }
 }
