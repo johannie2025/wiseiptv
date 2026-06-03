@@ -8,20 +8,15 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.widget.*;
 import androidx.fragment.app.FragmentActivity;
-import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
 import com.wdesign.wiseiptv.tv.R;
-import com.wdesign.wiseiptv.tv.util.ActivationManager;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
 /**
- * TvActivationActivity — PREMIER ÉCRAN TV, affiché seulement si nécessaire.
- *
- * Skip automatique si activation valide en cache (même logique que mobile).
- * En cas d'expiration → affiche l'écran explicitement.
- * Bouton "Accéder" → télécharge toutes les playlists DNS avant d'ouvrir TvMainActivity.
+ * TvActivationActivity — vérifie l'activation, puis transfère à TvMainActivity.
+ * Le téléchargement des playlists se fait dans TvMainActivity (non bloquant).
  */
 public class TvActivationActivity extends FragmentActivity {
 
@@ -38,9 +33,8 @@ public class TvActivationActivity extends FragmentActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // ── Skip si déjà activé et non expiré ──────────────────────
         if (isActiveAndNotExpired()) {
-            goToMain(false);
+            goToMain(false, null);
             return;
         }
 
@@ -59,20 +53,16 @@ public class TvActivationActivity extends FragmentActivity {
         btnAccess      = findViewById(R.id.btn_access);
         progressBar    = findViewById(R.id.progress_bar);
 
-        // Logo
         if (imgLogo != null) imgLogo.setImageResource(R.mipmap.ic_launcher);
-
         tvDeviceKey.setText(DeviceSecurity.getOrCreateKey(this));
 
         btnCheck.setOnClickListener(v -> checkActivation(false));
         btnAccess.setOnClickListener(v -> checkActivation(true));
         btnCheck.requestFocus();
 
-        // Si expiré, montrer immédiatement
         String saved = getPrefs().getString("status", "");
         if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) showInactive(saved);
 
-        // Vérification réseau silencieuse
         checkActivation(false);
     }
 
@@ -83,51 +73,26 @@ public class TvActivationActivity extends FragmentActivity {
             public void onActive(DeviceSecurity.ActivationResult r) {
                 saveCache(r);
                 runOnUiThread(() -> {
+                    setLoading(false);
                     if (goOnSuccess) {
-                        downloadAndGo(r);
+                        // Aller directement — pas de téléchargement ici
+                        goToMain(true, r);
                     } else {
-                        setLoading(false);
                         showActive(r);
                     }
                 });
             }
-
             @Override
             public void onInactive(String status, String message) {
                 clearCache(status);
                 runOnUiThread(() -> { setLoading(false); showInactive(status); });
             }
-
             @Override
             public void onError(String message) {
                 runOnUiThread(() -> {
                     setLoading(false);
                     if (isActiveAndNotExpired()) showOffline();
                     else showPending(message);
-                });
-            }
-        });
-    }
-
-    private void downloadAndGo(DeviceSecurity.ActivationResult r) {
-        btnAccess.setEnabled(false);
-        btnAccess.setText("Téléchargement…");
-        progressBar.setVisibility(View.VISIBLE);
-
-        AppDatabase db = AppDatabase.get(this);
-        ActivationManager.upsertAndDownloadAll(this, db, r, new ActivationManager.DownloadCallback() {
-            @Override public void onProgress(String name) {
-                runOnUiThread(() -> btnAccess.setText("📥 " + name + "…"));
-            }
-            @Override public void onDone(int total) {
-                runOnUiThread(() -> { progressBar.setVisibility(View.GONE); goToMain(true); });
-            }
-            @Override public void onError(String msg) {
-                runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    Toast.makeText(TvActivationActivity.this,
-                        "Téléchargement partiel : " + msg, Toast.LENGTH_LONG).show();
-                    goToMain(true);
                 });
             }
         });
@@ -163,19 +128,17 @@ public class TvActivationActivity extends FragmentActivity {
     }
 
     private void showPending(String err) {
-        cardProvider.setVisibility(View.GONE);
-        btnAccess.setVisibility(View.GONE);
+        cardProvider.setVisibility(View.GONE); btnAccess.setVisibility(View.GONE);
         tvStatus.setText("⏳ EN ATTENTE"); tvStatus.setTextColor(0xFFFFEB3B);
-        tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur.\n(" + err + ")");
+        tvStatusDetail.setText("Communiquez votre Device Key.\n(" + err + ")");
     }
 
     private void showOffline() {
         tvStatus.setText("📡 HORS LIGNE"); tvStatus.setTextColor(0xFF9E9E9E);
         tvStatusDetail.setText("Pas de connexion. Accès via le cache.");
-        btnAccess.setVisibility(View.VISIBLE);
-        btnAccess.setEnabled(true);
+        btnAccess.setVisibility(View.VISIBLE); btnAccess.setEnabled(true);
         btnAccess.setText("▶ Continuer hors ligne");
-        btnAccess.setOnClickListener(v -> goToMain(true));
+        btnAccess.setOnClickListener(v -> goToMain(true, null));
         btnAccess.requestFocus();
     }
 
@@ -191,23 +154,52 @@ public class TvActivationActivity extends FragmentActivity {
     }
 
     private void saveCache(DeviceSecurity.ActivationResult r) {
-        getPrefs().edit()
+        SharedPreferences.Editor ed = getPrefs().edit()
             .putString("status", "ACTIVE")
             .putString("expires_at", r.expiresAt)
-            .putString("login", r.login).apply();
+            .putString("login", r.login)
+            .putString("password", r.password);
+        // Sauvegarder les DNS pour TvMainActivity
+        StringBuilder urls = new StringBuilder(), epgs = new StringBuilder();
+        for (int i = 0; i < r.dnsServers.size(); i++) {
+            if (i > 0) { urls.append(","); epgs.append(","); }
+            urls.append(r.dnsServers.get(i).url);
+            String epg = r.dnsServers.get(i).epgUrl;
+            epgs.append(epg != null ? epg : "");
+        }
+        ed.putString("dns_urls", urls.toString())
+          .putString("dns_epg_urls", epgs.toString())
+          .apply();
     }
 
     private void clearCache(String status) {
         getPrefs().edit().putString("status", status)
-            .remove("expires_at").remove("login").apply();
+            .remove("expires_at").remove("login").remove("password")
+            .remove("dns_urls").remove("dns_epg_urls").apply();
     }
 
     private SharedPreferences getPrefs() {
         return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    private void goToMain(boolean animate) {
-        startActivity(new Intent(this, TvMainActivity.class));
+    /** Navigue vers TvMainActivity avec les infos d'activation en extras. */
+    private void goToMain(boolean animate, DeviceSecurity.ActivationResult r) {
+        Intent intent = new Intent(this, TvMainActivity.class);
+        if (r != null) {
+            intent.putExtra(TvMainActivity.EXTRA_ACT_LOGIN,    r.login);
+            intent.putExtra(TvMainActivity.EXTRA_ACT_PASSWORD, r.password);
+            intent.putExtra(TvMainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt);
+            String[] dnsUrls = new String[r.dnsServers.size()];
+            String[] epgUrls = new String[r.dnsServers.size()];
+            for (int i = 0; i < r.dnsServers.size(); i++) {
+                dnsUrls[i] = r.dnsServers.get(i).url;
+                String epg = r.dnsServers.get(i).epgUrl;
+                epgUrls[i] = epg != null ? epg : "";
+            }
+            intent.putExtra(TvMainActivity.EXTRA_ACT_DNS_URLS,     dnsUrls);
+            intent.putExtra(TvMainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
+        }
+        startActivity(intent);
         if (!animate) overridePendingTransition(0, 0);
         finish();
     }

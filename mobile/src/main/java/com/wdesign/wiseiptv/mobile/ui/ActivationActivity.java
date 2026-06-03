@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
+import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
 import com.wdesign.wiseiptv.mobile.R;
 import com.wdesign.wiseiptv.mobile.util.ActivationManager;
