@@ -23,17 +23,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 
-/**
- * MainActivity
- *
- * CORRECTIONS DE COMPILATION & STABILITÉ :
- * 1. Alignement strict avec les méthodes réelles de ChannelDao (getLiveGroups, getLive, getAll, etc.).
- * 2. Utilisation de la méthode de mise à jour native de ton adapter : adapter.setData(list).
- * 3. FIX DU CRASH DES OBSERVERS : Un seul observer actif à la fois grâce à removeObserver().
- * 4. Alignement avec l'absence de callback de téléchargement asynchrone direct (ou gestion via Room/UI).
- */
 public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
+    // Extras reçus depuis ActivationActivity
     public static final String EXTRA_ACT_LOGIN        = "act_login";
     public static final String EXTRA_ACT_PASSWORD     = "act_password";
     public static final String EXTRA_ACT_EXPIRES      = "act_expires";
@@ -53,11 +45,11 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private int    currentTab   = 0;
     private String currentGroup = null;
 
-    // ── FIX : Références pour maintenir un unique observer actif à la fois ──
-    private LiveData<List<ChannelEntity>>  currentLiveData;
-    private Observer<List<ChannelEntity>>  currentObserver;
-    private LiveData<List<String>>          currentGroupLiveData;
-    private Observer<List<String>>          currentGroupObserver;
+    // FIX : un seul observer LiveData actif à la fois
+    private LiveData<List<ChannelEntity>> currentLiveData;
+    private Observer<List<ChannelEntity>> currentObserver;
+    private LiveData<List<String>>        currentGroupLiveData;
+    private Observer<List<String>>        currentGroupObserver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,37 +73,115 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         setupSearch();
         setupBottomNav();
 
-        // Affiche immédiatement le cache local de Room
-        observeCurrentTab();
-
-        // Lancement de la vérification/synchronisation arrière-plan
+        // ÉTAPE 1 : Traitement de la synchronisation d'activation ou vérification du cache local
         startBackgroundSync();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // GESTION SÉCURISÉE DES OBSERVERS (Évite les fuites et les crashs ANR)
+    // GESTION DU CHARGEMENT DES DONNÉES ET ACTIVATION
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void startBackgroundSync() {
+        Intent intent = getIntent();
+        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
+        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
+        String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
+        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
+        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
+
+        // Si on vient de cliquer sur "Accéder au contenu" dans ActivationActivity, on reçoit ces extras
+        if (login != null && dnsUrls != null && dnsUrls.length > 0) {
+            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
+            for (int i = 0; i < dnsUrls.length; i++) {
+                String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length) ? dnsEpgUrls[i] : "";
+                entries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
+            }
+            DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
+                    DeviceSecurity.getOrCreateKey(this), login, password != null ? password : "",
+                    expires != null ? expires : "", entries);
+            
+            launchDownload(result);
+            return;
+        }
+
+        // Sinon, c'est un démarrage normal de l'application (Vérification classique de la base de données)
+        Executors.newSingleThreadExecutor().execute(() -> {
+            List<PlaylistEntity> all = db.playlistDao().getAllSync();
+            runOnUiThread(() -> {
+                if (all.isEmpty()) {
+                    // FIX CRASH : L'affichage du Dialog doit impérativement se faire sur l'UI Thread
+                    showAddPlaylistDialog();
+                } else {
+                    // Des playlists existent → afficher le cache immédiatement
+                    observeCurrentTab();
+                    // Rafraîchir en background de manière transparente si obsolète (> 7 jours)
+                    PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
+                        @Override public void onDone(int count) {
+                            if (count > 0) runOnUiThread(() -> observeCurrentTab());
+                        }
+                        @Override public void onError(String msg) {}
+                    });
+                }
+            });
+        });
+    }
+
+    private void launchDownload(DeviceSecurity.ActivationResult result) {
+        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            // Sauvegarde les SharedPreferences et injecte / charge la playlist d'activation via PlaylistLoader
+            ActivationManager.checkAndSync(getApplicationContext(), new ActivationManager.OnResult() {
+                @Override
+                public void onActivated(DeviceSecurity.ActivationResult r) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (progressBar != null) progressBar.setVisibility(View.GONE);
+                        observeCurrentTab(); // Se déclenche dès que les chaînes commencent à arriver
+                        Toast.makeText(MainActivity.this, "Contenu activé avec succès !", Toast.LENGTH_SHORT).show();
+                    });
+                }
+
+                @Override
+                public void onExpired(String status) {
+                    runOnUiThread(() -> {
+                        if (progressBar != null) progressBar.setVisibility(View.GONE);
+                        Toast.makeText(MainActivity.this, "Compte expiré ou désactivé", Toast.LENGTH_LONG).show();
+                    });
+                }
+
+                @Override
+                public void onError(String msg) {
+                    runOnUiThread(() -> {
+                        if (progressBar != null) progressBar.setVisibility(View.GONE);
+                        Toast.makeText(MainActivity.this, "Erreur réseau: " + msg, Toast.LENGTH_LONG).show();
+                    });
+                }
+            });
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GESTION SÉCURISÉE DES OBSERVERS (Un seul observer actif à la fois)
     // ─────────────────────────────────────────────────────────────────────────
 
     private void observeChannels(LiveData<List<ChannelEntity>> liveData) {
-        if (currentLiveData != null && currentObserver != null) {
+        if (currentLiveData != null && currentObserver != null)
             currentLiveData.removeObserver(currentObserver);
-        }
         currentObserver = list -> updateList(list);
         currentLiveData = liveData;
         currentLiveData.observe(this, currentObserver);
     }
 
     private void observeGroups(LiveData<List<String>> liveData) {
-        if (currentGroupLiveData != null && currentGroupObserver != null) {
+        if (currentGroupLiveData != null && currentGroupObserver != null)
             currentGroupLiveData.removeObserver(currentGroupObserver);
-        }
         currentGroupObserver = groups -> updateGroupSpinner(groups);
         currentGroupLiveData = liveData;
         currentGroupLiveData.observe(this, currentGroupObserver);
     }
 
-private void observeCurrentTab() {
-        // 1. Chargement des groupes selon l'onglet (Appels DAO d'origine reconnus)
+    private void observeCurrentTab() {
         switch (currentTab) {
             case 1: observeGroups(db.channelDao().getLiveGroups());   break;
             case 2: observeGroups(db.channelDao().getFilmGroups());   break;
@@ -119,7 +189,6 @@ private void observeCurrentTab() {
             default: updateGroupSpinner(null); break;
         }
 
-        // 2. Filtrage par groupe si sélectionné
         if (currentGroup != null) {
             switch (currentTab) {
                 case 1: observeChannels(db.channelDao().getLiveByGroup(currentGroup));  return;
@@ -128,10 +197,9 @@ private void observeCurrentTab() {
             }
         }
 
-        // 3. Filtrage global par onglet par défaut
         switch (currentTab) {
             case 0: observeChannels(db.channelDao().getAll());       break;
-            case 1: observeChannels(db.channelDao().getLive());      break; // <- Parenthèse corrigée ici
+            case 1: observeChannels(db.channelDao().getLive());      break;
             case 2: observeChannels(db.channelDao().getFilms());     break;
             case 3: observeChannels(db.channelDao().getSeries());    break;
             case 4: observeChannels(db.channelDao().getFavorites()); break;
@@ -145,81 +213,7 @@ private void observeCurrentTab() {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // SYNCHRONISATION ET CHARGEMENT
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private void startBackgroundSync() {
-        Intent intent = getIntent();
-        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
-        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
-        String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
-        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
-        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
-
-        if (login != null && dnsUrls != null && dnsUrls.length > 0) {
-            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
-            for (int i = 0; i < dnsUrls.length; i++) {
-                String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length) ? dnsEpgUrls[i] : "";
-                entries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
-            }
-            DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
-                    DeviceSecurity.getOrCreateKey(this), login, password != null ? password : "",
-                    expires != null ? expires : "", entries);
-            launchDownload(result);
-            return;
-        }
-
-        SharedPreferences prefs = getSharedPreferences("wise_activation", Context.MODE_PRIVATE);
-        String savedStatus  = prefs.getString("status", "UNKNOWN");
-        String savedLogin   = prefs.getString("login", null);
-        String savedPass    = prefs.getString("password", "");
-        String savedExpires = prefs.getString("expires_at", "");
-
-        if ("ACTIVE".equals(savedStatus) && savedLogin != null) {
-            final String fLogin = savedLogin, fPass = savedPass, fExpires = savedExpires;
-            Executors.newSingleThreadExecutor().execute(() -> {
-                List<PlaylistEntity> all = db.playlistDao().getAllSync();
-                List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
-                boolean anyStale = false;
-                for (PlaylistEntity pl : all) {
-                    if (pl.isActive && pl.type == PlaylistEntity.TYPE_XTREAM) {
-                        entries.add(new DeviceSecurity.DnsEntry(pl.url, "", entries.size()));
-                        if (PlaylistLoader.needsRefresh(pl)) anyStale = true;
-                    }
-                }
-                if (!entries.isEmpty() && anyStale) {
-                    DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
-                            DeviceSecurity.getOrCreateKey(this), fLogin, fPass, fExpires, entries);
-                    runOnUiThread(() -> launchDownload(result));
-                }
-            });
-            return;
-        }
-
-        PlaylistLoader.refreshStaleIfNeeded(db, null);
-    }
-
-private void launchDownload(DeviceSecurity.ActivationResult result) {
-    if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
-
-    // On utilise directement le résultat valide transmis par l'ActivationActivity
-    Executors.newSingleThreadExecutor().execute(() -> {
-        ActivationManager.saveAndLoadResult(getApplicationContext(), db, result);
-        
-        // Une fois l'opération lancée, on rafraîchit l'UI sur le Thread Principal
-        runOnUiThread(() -> {
-            if (isFinishing() || isDestroyed()) return;
-            if (progressBar != null) progressBar.setVisibility(View.GONE);
-            
-            // Re-observe Room qui va se mettre à jour automatiquement dès que PlaylistLoader aura fini
-            observeCurrentTab();
-            Toast.makeText(MainActivity.this, "⚡ Synchronisation du contenu lancée...", Toast.LENGTH_SHORT).show();
-        });
-    });
-}
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // COMPOSANTS COMPORTEMENTAUX (TABS / SEARCH / SPINNER)
+    // COMPOSANTS COMPORTEMENTAUX (TABS / SEARCH / BOTTOMNAV / SPINNER)
     // ─────────────────────────────────────────────────────────────────────────
 
     private void setupTabs() {
@@ -360,11 +354,9 @@ private void launchDownload(DeviceSecurity.ActivationResult result) {
 
     @Override protected void onDestroy() {
         super.onDestroy();
-        if (currentLiveData != null && currentObserver != null) {
+        if (currentLiveData != null && currentObserver != null)
             currentLiveData.removeObserver(currentObserver);
-        }
-        if (currentGroupLiveData != null && currentGroupObserver != null) {
+        if (currentGroupLiveData != null && currentGroupObserver != null)
             currentGroupLiveData.removeObserver(currentGroupObserver);
-        }
     }
 }
