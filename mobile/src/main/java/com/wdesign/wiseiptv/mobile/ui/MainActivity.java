@@ -110,7 +110,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         currentGroupLiveData.observe(this, currentGroupObserver);
     }
 
-    private void observeCurrentTab() {
+private void observeCurrentTab() {
         // 1. Chargement des groupes selon l'onglet (Appels DAO d'origine reconnus)
         switch (currentTab) {
             case 1: observeGroups(db.channelDao().getLiveGroups());   break;
@@ -131,7 +131,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         // 3. Filtrage global par onglet par défaut
         switch (currentTab) {
             case 0: observeChannels(db.channelDao().getAll());       break;
-            case 1: observeChannels(db.channelDao().getLive();      break;
+            case 1: observeChannels(db.channelDao().getLive());      break; // <- Parenthèse corrigée ici
             case 2: observeChannels(db.channelDao().getFilms());     break;
             case 3: observeChannels(db.channelDao().getSeries());    break;
             case 4: observeChannels(db.channelDao().getFavorites()); break;
