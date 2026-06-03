@@ -200,15 +200,37 @@ private void observeCurrentTab() {
     }
 
     private void launchDownload(DeviceSecurity.ActivationResult result) {
-        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+    if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
 
-        // Correction : L'appel à downloadAllPlaylistsAsync ne prend pas de callback direct de succès/échec
-        // La mise à jour des données se propage de toute manière automatiquement via Room et les LiveData.
-        ActivationManager.downloadAllPlaylistsAsync(getApplicationContext(), db, result);
-        
-        // On masque le progress après l'initialisation du téléchargement asynchrone
-        if (progressBar != null) progressBar.setVisibility(View.GONE);
-    }
+    // Utilisation de la méthode native existante dans ton ActivationManager
+    ActivationManager.checkAndSync(getApplicationContext(), new ActivationManager.OnResult() {
+        @Override
+        public void onActivated(DeviceSecurity.ActivationResult r) {
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (progressBar != null) progressBar.setVisibility(View.GONE);
+                observeCurrentTab();
+                Toast.makeText(MainActivity.this, "✅ Chaînes synchronisées !", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        @Override
+        public void onExpired(String status) {
+            runOnUiThread(() -> {
+                if (progressBar != null) progressBar.setVisibility(View.GONE);
+                Toast.makeText(MainActivity.this, "❌ Compte expiré : " + status, Toast.LENGTH_LONG).show();
+            });
+        }
+
+        @Override
+        public void onError(String msg) {
+            runOnUiThread(() -> {
+                if (progressBar != null) progressBar.setVisibility(View.GONE);
+                Toast.makeText(MainActivity.this, "⚠️ Erreur : " + msg, Toast.LENGTH_LONG).show();
+            });
+        }
+    });
+}
 
     // ─────────────────────────────────────────────────────────────────────────
     // COMPOSANTS COMPORTEMENTAUX (TABS / SEARCH / SPINNER)
