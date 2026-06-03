@@ -161,11 +161,8 @@ public class TvMainActivity extends FragmentActivity {
             else removeRow(9001);
         });
 
-        // FIX 5 : Récents (triés par sortOrder DESC = derniers vus en premier)
-        db.channelDao().getRecents().observe(this, list -> {
-            if (list != null && !list.isEmpty()) upsertRow("🕐 Récents", 9002, p, list);
-            else removeRow(9002);
-        });
+        // Récents : chargés manuellement depuis recentIds (pas de DAO requis)
+        loadRecentsRow(p);
     }
 
     private void upsertRow(String title, int id, TvCardPresenter p, List<ChannelEntity> list) {
@@ -281,13 +278,47 @@ public class TvMainActivity extends FragmentActivity {
             });
     }
 
-    // ── Player ────────────────────────────────────────────────────────────────
+    private static final String PREFS_RECENTS = "wise_tv_recents";
+    private static final int    MAX_RECENTS   = 30;
+
+    /** Sauvegarde l'id de la chaîne dans les récents (SharedPreferences). */
+    private void saveRecent(long channelId) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_RECENTS, Context.MODE_PRIVATE);
+        String raw = prefs.getString("ids", "");
+        // Reconstruire la liste en mettant cet id en tête
+        List<String> ids = new ArrayList<>(Arrays.asList(raw.isEmpty() ? new String[0] : raw.split(",")));
+        String sid = String.valueOf(channelId);
+        ids.remove(sid);
+        ids.add(0, sid);
+        if (ids.size() > MAX_RECENTS) ids = ids.subList(0, MAX_RECENTS);
+        prefs.edit().putString("ids", android.text.TextUtils.join(",", ids)).apply();
+        loadRecentsRow(null); // rafraîchir la ligne Récents
+    }
+
+    /** Charge la ligne Récents depuis les ids sauvegardés en prefs. */
+    private void loadRecentsRow(TvCardPresenter presenterArg) {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            SharedPreferences prefs = getSharedPreferences(PREFS_RECENTS, Context.MODE_PRIVATE);
+            String raw = prefs.getString("ids", "");
+            if (raw.isEmpty()) { runOnUiThread(() -> removeRow(9002)); return; }
+            List<ChannelEntity> recents = new ArrayList<>();
+            for (String sid : raw.split(",")) {
+                try {
+                    ChannelEntity ch = db.channelDao().findById(Long.parseLong(sid.trim()));
+                    if (ch != null) recents.add(ch);
+                } catch (NumberFormatException ignored) {}
+            }
+            final List<ChannelEntity> fr = recents;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (!fr.isEmpty()) upsertRow("🕐 Récents", 9002, new TvCardPresenter(), fr);
+                else removeRow(9002);
+            });
+        });
+    }
 
     private void openPlayer(ChannelEntity ch) {
-        // Marquer comme récent
-        Executors.newSingleThreadExecutor().execute(() ->
-            db.channelDao().markAsRecent(ch.id, System.currentTimeMillis())
-        );
+        saveRecent(ch.id); // SharedPreferences, pas de DAO
         Intent i = new Intent(this, TvPlayerActivity.class);
         i.putExtra(TvPlayerActivity.EXTRA_ID,   ch.id);
         i.putExtra(TvPlayerActivity.EXTRA_NAME, ch.name);

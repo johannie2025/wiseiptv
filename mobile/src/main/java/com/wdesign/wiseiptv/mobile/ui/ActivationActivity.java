@@ -175,14 +175,16 @@ public class ActivationActivity extends AppCompatActivity {
             // Chercher les playlists d'activation existantes
             java.util.List<com.wdesign.wiseiptv.core.db.entity.PlaylistEntity> pls =
                 db.playlistDao().getAllSync();
-            boolean hasActivation = false;
+            // FIX : final pour être utilisable dans le lambda runOnUiThread
+            boolean found = false;
             for (com.wdesign.wiseiptv.core.db.entity.PlaylistEntity pl : pls) {
                 if (pl.isActive && pl.type ==
                     com.wdesign.wiseiptv.core.db.entity.PlaylistEntity.TYPE_XTREAM) {
-                    hasActivation = true;
+                    found = true;
                     break;
                 }
             }
+            final boolean hasActivation = found;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 progressBar.setVisibility(View.GONE);
