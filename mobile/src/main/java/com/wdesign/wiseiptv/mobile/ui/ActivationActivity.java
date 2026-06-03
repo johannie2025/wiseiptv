@@ -1,312 +1,227 @@
 package com.wdesign.wiseiptv.mobile.ui;
 
-import android.content.*;
-import android.os.*;
-import android.text.TextUtils;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Bundle;
 import android.view.View;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.lifecycle.LiveData;
-import androidx.lifecycle.Observer;
-import androidx.recyclerview.widget.*;
-import com.google.android.material.bottomnavigation.BottomNavigationView;
-import com.google.android.material.tabs.TabLayout;
-import com.wdesign.wiseiptv.core.db.AppDatabase;
-import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
-import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
+import com.wdesign.wiseiptv.core.security.DeviceSecurity;
 import com.wdesign.wiseiptv.mobile.R;
-import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
-import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.Executors;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
-/**
- * MainActivity
- *
- * CORRECTIONS :
- *  1. FIX CRASH PRINCIPAL — observers LiveData accumulés.
- *     L'ancienne version appelait liveData.observe(this, callback) sans jamais
- *     supprimer l'observer précédent. À chaque onResume(), changement d'onglet
- *     ou sélection de groupe, un nouvel observer s'ajoutait. Room notifiait
- *     updateList() des dizaines de fois par update → ANR → "cesse de fonctionner".
- *     FIX : observeChannels() et observeGroups() appellent removeObserver()
- *     avant chaque nouveau observe(). Un seul observer actif à la fois.
- *
- *  2. FIX — Ne propose plus d'ajouter une playlist si les playlists d'activation
- *     sont déjà présentes. showAddPlaylistDialog() n'est lancé que si AUCUNE
- *     playlist d'aucun type n'existe.
- *
- *  3. Refresh silencieux au démarrage : si des playlists existent mais sont
- *     stales (> 7j), PlaylistLoader.refreshStaleIfNeeded() les rafraîchit
- *     en arrière-plan sans bloquer l'UI.
- */
-public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
+public class ActivationActivity extends AppCompatActivity {
 
-    private RecyclerView         rvChannels;
-    private ChannelAdapter       adapter;
-    private ProgressBar          progressBar;
-    private TextView             tvEmpty;
-    private TabLayout            tabLayout;
-    private BottomNavigationView bottomNav;
-    private SearchView           searchView;
-    private Spinner              spinnerGroup;
-    private AppDatabase          db;
+    private static final String PREFS = "wise_activation";
 
-    private int    currentTab   = 0;
-    private String currentGroup = null;
-
-    // FIX : un seul observer LiveData actif à la fois
-    private LiveData<List<ChannelEntity>> currentLiveData;
-    private Observer<List<ChannelEntity>> currentObserver;
-    private LiveData<List<String>>        currentGroupLiveData;
-    private Observer<List<String>>        currentGroupObserver;
+    private TextView    tvDeviceKey, tvStatus, tvStatusDetail;
+    private TextView    tvProviderLabel, tvLogin, tvPassword, tvExpiry;
+    private View        cardProvider;
+    private Button      btnCheck, btnAccess, btnCopy;
+    private ProgressBar progressBar;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
 
-        db           = AppDatabase.get(this);
-        rvChannels   = findViewById(R.id.rv_channels);
-        progressBar  = findViewById(R.id.progress_bar);
-        tvEmpty      = findViewById(R.id.tv_empty);
-        tabLayout    = findViewById(R.id.tab_layout);
-        bottomNav    = findViewById(R.id.bottom_nav);
-        searchView   = findViewById(R.id.search_view);
-        spinnerGroup = findViewById(R.id.spinner_group);
-
-        adapter = new ChannelAdapter(this);
-        rvChannels.setLayoutManager(new GridLayoutManager(this, 3));
-        rvChannels.setAdapter(adapter);
-
-        setupTabs();
-        setupSearch();
-        setupBottomNav();
-
-        // Vérifier les playlists en arrière-plan
-        Executors.newSingleThreadExecutor().execute(() -> {
-            List<PlaylistEntity> all = db.playlistDao().getAllSync();
-            runOnUiThread(() -> {
-                if (all.isEmpty()) {
-                    // Aucune playlist du tout → proposer d'en ajouter
-                    showAddPlaylistDialog();
-                } else {
-                    // Des playlists existent → afficher le cache immédiatement
-                    observeCurrentTab();
-                    // Rafraîchir en background si stale
-                    PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
-                        @Override public void onDone(int count) {
-                            if (count > 0) runOnUiThread(() -> observeCurrentTab());
-                        }
-                        @Override public void onError(String msg) {}
-                    });
-                }
-            });
-        });
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // FIX PRINCIPAL : un seul observer actif à la fois
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private void observeChannels(LiveData<List<ChannelEntity>> liveData) {
-        if (currentLiveData != null && currentObserver != null)
-            currentLiveData.removeObserver(currentObserver);
-        currentObserver = list -> updateList(list);
-        currentLiveData = liveData;
-        currentLiveData.observe(this, currentObserver);
-    }
-
-    private void observeGroups(LiveData<List<String>> liveData) {
-        if (currentGroupLiveData != null && currentGroupObserver != null)
-            currentGroupLiveData.removeObserver(currentGroupObserver);
-        currentGroupObserver = groups -> updateGroupSpinner(groups);
-        currentGroupLiveData = liveData;
-        currentGroupLiveData.observe(this, currentGroupObserver);
-    }
-
-    private void observeCurrentTab() {
-        // Groupes selon l'onglet
-        switch (currentTab) {
-            case 1: observeGroups(db.channelDao().getLiveGroups());   break;
-            case 2: observeGroups(db.channelDao().getFilmGroups());   break;
-            case 3: observeGroups(db.channelDao().getSeriesGroups()); break;
-            default: updateGroupSpinner(null); break;
+        if (isActiveAndNotExpired()) {
+            goToMain(false, null);
+            return;
         }
-        // Chaînes : filtre groupe si sélectionné
-        if (currentGroup != null) {
-            switch (currentTab) {
-                case 1: observeChannels(db.channelDao().getLiveByGroup(currentGroup));   return;
-                case 2: observeChannels(db.channelDao().getFilmsByGroup(currentGroup));  return;
-                case 3: observeChannels(db.channelDao().getSeriesByGroup(currentGroup)); return;
-            }
-        }
-        switch (currentTab) {
-            case 0: observeChannels(db.channelDao().getAll());       break;
-            case 1: observeChannels(db.channelDao().getLive());      break;
-            case 2: observeChannels(db.channelDao().getFilms());     break;
-            case 3: observeChannels(db.channelDao().getSeries());    break;
-            case 4: observeChannels(db.channelDao().getFavorites()); break;
-        }
-    }
 
-    private void updateList(List<ChannelEntity> list) {
-        if (adapter != null) adapter.setData(list);
-        if (tvEmpty != null)
-            tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
-    }
+        setContentView(R.layout.activity_activation);
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Tabs / Search / BottomNav / Spinner
-    // ─────────────────────────────────────────────────────────────────────────
+        tvDeviceKey     = findViewById(R.id.tv_device_key);
+        tvStatus        = findViewById(R.id.tv_status);
+        tvStatusDetail  = findViewById(R.id.tv_status_detail);
+        tvProviderLabel = findViewById(R.id.tv_provider_label);
+        tvLogin         = findViewById(R.id.tv_login);
+        tvPassword      = findViewById(R.id.tv_password);
+        tvExpiry        = findViewById(R.id.tv_expiry);
+        cardProvider    = findViewById(R.id.card_provider);
+        btnCheck        = findViewById(R.id.btn_check);
+        btnAccess       = findViewById(R.id.btn_access);
+        btnCopy         = findViewById(R.id.btn_copy_key);
+        progressBar     = findViewById(R.id.progress_bar);
 
-    private void setupTabs() {
-        String[] tabs = {"Tout", "Live", "Films", "Séries", "Favoris"};
-        for (String t : tabs) tabLayout.addTab(tabLayout.newTab().setText(t));
-        tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
-            @Override public void onTabSelected(TabLayout.Tab t) {
-                currentTab = t.getPosition(); currentGroup = null;
-                observeCurrentTab();
-            }
-            @Override public void onTabUnselected(TabLayout.Tab t) {}
-            @Override public void onTabReselected(TabLayout.Tab t) {}
-        });
-    }
+        String key = DeviceSecurity.getOrCreateKey(this);
+        tvDeviceKey.setText(key);
 
-    private void updateGroupSpinner(List<String> groups) {
-        if (spinnerGroup == null) return;
-        if (groups == null || groups.isEmpty()) { spinnerGroup.setVisibility(View.GONE); return; }
-        spinnerGroup.setVisibility(View.VISIBLE);
-        ArrayList<String> items = new ArrayList<>();
-        items.add("Tous les groupes");
-        items.addAll(groups);
-        ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, items);
-        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinnerGroup.setAdapter(a);
-        spinnerGroup.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
-                currentGroup = pos == 0 ? null : items.get(pos);
-                observeCurrentTab();
-            }
-            @Override public void onNothingSelected(AdapterView<?> p) {}
-        });
-    }
-
-    private void setupSearch() {
-        if (searchView == null) return;
-        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
-            @Override public boolean onQueryTextSubmit(String q) { return false; }
-            @Override public boolean onQueryTextChange(String q) {
-                if (TextUtils.isEmpty(q)) { observeCurrentTab(); return true; }
-                observeChannels(db.channelDao().search(q));
-                return true;
-            }
-        });
-    }
-
-    private void setupBottomNav() {
-        if (bottomNav == null) return;
-        bottomNav.setOnItemSelectedListener(item -> {
-            int id = item.getItemId();
-            if      (id == R.id.nav_home)     { observeCurrentTab(); return true; }
-            else if (id == R.id.nav_add)      { showAddPlaylistDialog(); return true; }
-            else if (id == R.id.nav_settings) { startActivity(new Intent(this, SettingsActivity.class)); return true; }
-            return false;
-        });
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Ajout manuel de playlist
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public void showAddPlaylistDialog() {
-        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
-        b.setTitle("Ajouter une playlist");
-        android.view.View v = getLayoutInflater().inflate(R.layout.dialog_add_playlist, null);
-        EditText   etName   = v.findViewById(R.id.et_playlist_name);
-        EditText   etUrl    = v.findViewById(R.id.et_playlist_url);
-        EditText   etServer = v.findViewById(R.id.et_xtream_server);
-        EditText   etUser   = v.findViewById(R.id.et_xtream_user);
-        EditText   etPass   = v.findViewById(R.id.et_xtream_pass);
-        RadioGroup rgType   = v.findViewById(R.id.rg_type);
-        android.view.View layoutXtream = v.findViewById(R.id.layout_xtream);
-
-        rgType.setOnCheckedChangeListener((g, checked) -> {
-            boolean isX = checked == R.id.rb_xtream;
-            layoutXtream.setVisibility(isX ? View.VISIBLE : View.GONE);
-            etUrl.setVisibility(isX ? View.GONE : View.VISIBLE);
+        btnCopy.setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
+            Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
         });
 
-        b.setView(v);
-        b.setPositiveButton("Charger", (d, w) -> {
-            String name = etName.getText().toString().trim();
-            int checkedId = rgType.getCheckedRadioButtonId();
-            PlaylistEntity pl = new PlaylistEntity();
-            pl.name = name.isEmpty() ? "Playlist" : name;
-            pl.lastUpdated = 0;
+        btnCheck.setOnClickListener(v -> checkActivation(false));
+        btnAccess.setOnClickListener(v -> checkActivation(true));
 
-            if (checkedId == R.id.rb_xtream) {
-                String server = etServer.getText().toString().trim();
-                String user   = etUser.getText().toString().trim();
-                String pass   = etPass.getText().toString().trim();
-                if (server.isEmpty() || user.isEmpty()) return;
-                pl.type = PlaylistEntity.TYPE_XTREAM;
-                pl.url = server; pl.username = user; pl.password = pass;
-            } else {
-                String url = etUrl.getText().toString().trim();
-                if (TextUtils.isEmpty(url)) return;
-                pl.type = checkedId == R.id.rb_m3u_file
-                        ? PlaylistEntity.TYPE_M3U_FILE : PlaylistEntity.TYPE_M3U_URL;
-                pl.url = url;
-            }
+        String saved = getPrefs().getString("status", "");
+        if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) showInactive(saved);
 
-            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
-            Executors.newSingleThreadExecutor().execute(() -> {
-                pl.id = db.playlistDao().insert(pl);
-                PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
-                    @Override public void onDone(int count) {
-                        runOnUiThread(() -> {
-                            if (progressBar != null) progressBar.setVisibility(View.GONE);
-                            observeCurrentTab();
-                            Toast.makeText(MainActivity.this, count + " chaînes chargées", Toast.LENGTH_SHORT).show();
-                        });
-                    }
-                    @Override public void onError(String msg) {
-                        runOnUiThread(() -> {
-                            if (progressBar != null) progressBar.setVisibility(View.GONE);
-                            Toast.makeText(MainActivity.this, "Erreur : " + msg, Toast.LENGTH_LONG).show();
-                        });
+        checkActivation(false);
+    }
+
+    private void checkActivation(boolean goOnSuccess) {
+        setLoading(true);
+        DeviceSecurity.check(this, new DeviceSecurity.Callback() {
+            @Override
+            public void onActive(DeviceSecurity.ActivationResult r) {
+                saveCache(r);
+                runOnUiThread(() -> {
+                    setLoading(false);
+                    if (goOnSuccess) {
+                        // Aller directement à MainActivity avec les extras — pas de téléchargement ici
+                        goToMain(true, r);
+                    } else {
+                        showActive(r);
                     }
                 });
-            });
+            }
+            @Override
+            public void onInactive(String status, String message) {
+                clearCache(status);
+                runOnUiThread(() -> { setLoading(false); showInactive(status); });
+            }
+            @Override
+            public void onError(String message) {
+                runOnUiThread(() -> {
+                    setLoading(false);
+                    if (isActiveAndNotExpired()) showOffline();
+                    else showPending(message);
+                });
+            }
         });
-        b.setNegativeButton("Annuler", null);
-        b.show();
     }
 
-    @Override public void onClick(ChannelEntity ch) {
-        Intent i = new Intent(this, PlayerActivity.class);
-        i.putExtra(PlayerActivity.EXTRA_ID,    ch.id);
-        i.putExtra(PlayerActivity.EXTRA_NAME,  ch.name);
-        i.putExtra(PlayerActivity.EXTRA_URL,   ch.streamUrl);
-        i.putExtra(PlayerActivity.EXTRA_TYPE,  ch.contentType);
-        i.putExtra(PlayerActivity.EXTRA_GROUP, ch.groupTitle);
-        i.putExtra(PlayerActivity.EXTRA_ORDER, ch.sortOrder);
-        startActivity(i);
+    private void showActive(DeviceSecurity.ActivationResult r) {
+        tvStatus.setText("✅ ACTIVÉ");
+        tvStatus.setTextColor(0xFF4CAF50);
+        tvStatusDetail.setText("Votre abonnement est actif");
+        cardProvider.setVisibility(View.VISIBLE);
+        tvLogin.setText("Login : " + r.login);
+        tvPassword.setText("Mot de passe : " + r.password);
+        tvExpiry.setText("Expire le : " + r.expiresAt);
+        if (!r.dnsServers.isEmpty())
+            tvProviderLabel.setText("Provider : " + r.dnsServers.get(0).url);
+        btnAccess.setVisibility(View.VISIBLE);
+        btnAccess.setEnabled(true);
+        btnAccess.setText("▶ Accéder au contenu");
     }
 
-    // FIX : onResume remplace l'observer au lieu d'en ajouter un nouveau
-    @Override protected void onResume() {
-        super.onResume();
-        observeCurrentTab();
+    private void showInactive(String status) {
+        cardProvider.setVisibility(View.GONE);
+        btnAccess.setVisibility(View.GONE);
+        if (status.contains("EXPIRED")) {
+            tvStatus.setText("⏰ EXPIRÉ");
+            tvStatus.setTextColor(0xFFFF9800);
+            tvStatusDetail.setText("Abonnement expiré.\nContactez votre revendeur pour renouveler.");
+        } else if (status.contains("DISABLED")) {
+            tvStatus.setText("🚫 DÉSACTIVÉ");
+            tvStatus.setTextColor(0xFFF44336);
+            tvStatusDetail.setText("Accès suspendu.\nContactez votre revendeur.");
+        } else {
+            tvStatus.setText("❌ NON ACTIVÉ");
+            tvStatus.setTextColor(0xFFF44336);
+            tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur pour activation.");
+        }
     }
 
-    @Override protected void onDestroy() {
-        super.onDestroy();
-        if (currentLiveData != null && currentObserver != null)
-            currentLiveData.removeObserver(currentObserver);
-        if (currentGroupLiveData != null && currentGroupObserver != null)
-            currentGroupLiveData.removeObserver(currentGroupObserver);
+    private void showPending(String err) {
+        cardProvider.setVisibility(View.GONE);
+        btnAccess.setVisibility(View.GONE);
+        tvStatus.setText("⏳ EN ATTENTE");
+        tvStatus.setTextColor(0xFFFFEB3B);
+        tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur.\n(" + err + ")");
+    }
+
+    private void showOffline() {
+        tvStatus.setText("📡 HORS LIGNE");
+        tvStatus.setTextColor(0xFF9E9E9E);
+        tvStatusDetail.setText("Pas de connexion. Accès via le cache.");
+        btnAccess.setVisibility(View.VISIBLE);
+        btnAccess.setEnabled(true);
+        btnAccess.setText("▶ Continuer hors ligne");
+        btnAccess.setOnClickListener(v -> goToMain(true, null));
+    }
+
+    private boolean isActiveAndNotExpired() {
+        SharedPreferences p = getPrefs();
+        if (!"ACTIVE".equals(p.getString("status", ""))) return false;
+        String exp = p.getString("expires_at", "");
+        if (exp.isEmpty()) return false;
+        try {
+            Date expDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).parse(exp);
+            return expDate != null && new Date().before(expDate);
+        } catch (Exception e) { return false; }
+    }
+
+    private void saveCache(DeviceSecurity.ActivationResult r) {
+        SharedPreferences.Editor ed = getPrefs().edit()
+            .putString("status", "ACTIVE")
+            .putString("expires_at", r.expiresAt)
+            .putString("login", r.login)
+            .putString("password", r.password);
+        // Sauvegarder les DNS urls pour MainActivity
+        StringBuilder urls = new StringBuilder();
+        StringBuilder epgs = new StringBuilder();
+        for (int i = 0; i < r.dnsServers.size(); i++) {
+            if (i > 0) { urls.append(","); epgs.append(","); }
+            urls.append(r.dnsServers.get(i).url);
+            epgs.append(r.dnsServers.get(i).epgUrl != null ? r.dnsServers.get(i).epgUrl : "");
+        }
+        ed.putString("dns_urls", urls.toString())
+          .putString("dns_epg_urls", epgs.toString())
+          .apply();
+    }
+
+    private void clearCache(String status) {
+        getPrefs().edit()
+            .putString("status", status)
+            .remove("expires_at")
+            .remove("login")
+            .remove("password")
+            .remove("dns_urls")
+            .remove("dns_epg_urls")
+            .apply();
+    }
+
+    private SharedPreferences getPrefs() {
+        return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /**
+     * Navigue vers MainActivity en passant les infos d'activation en extras.
+     * Le téléchargement des playlists se fait dans MainActivity.
+     */
+    private void goToMain(boolean animate, DeviceSecurity.ActivationResult r) {
+        Intent intent = new Intent(this, MainActivity.class);
+        if (r != null) {
+            intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login);
+            intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password);
+            intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt);
+            String[] dnsUrls = new String[r.dnsServers.size()];
+            String[] epgUrls = new String[r.dnsServers.size()];
+            for (int i = 0; i < r.dnsServers.size(); i++) {
+                dnsUrls[i] = r.dnsServers.get(i).url;
+                epgUrls[i] = r.dnsServers.get(i).epgUrl != null ? r.dnsServers.get(i).epgUrl : "";
+            }
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     dnsUrls);
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
+        }
+        startActivity(intent);
+        if (!animate) overridePendingTransition(0, 0);
+        finish();
+    }
+
+    private void setLoading(boolean on) {
+        progressBar.setVisibility(on ? View.VISIBLE : View.GONE);
+        btnCheck.setEnabled(!on);
+        btnCheck.setText(on ? "Vérification…" : "🔄 Vérifier l'activation");
     }
 }
