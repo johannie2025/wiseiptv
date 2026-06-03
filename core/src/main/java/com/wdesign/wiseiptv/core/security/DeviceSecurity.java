@@ -23,7 +23,7 @@ public final class DeviceSecurity {
 
     private static final String TAG        = "DeviceSecurity";
     // AJOUTEZ explicitement '?action=check-device' pour correspondre à 100% avec l'en-tête de l'api
-	private static final String PANEL_URL = "http://wisedesign.pro/wiseiptvpanel/api/index.php?action=check-device";	
+	private static final String PANEL_URL = "http://wisedesign.infinityfree.me/api/index.php?action=check-device";	
     private static final String PREFS_NAME = "wise_device";
     private static final String KEY_DEVICE = "device_key";
     private static final int    TIMEOUT_MS = 15_000;
