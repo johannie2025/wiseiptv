@@ -32,6 +32,16 @@ public class ActivationManager {
         void onError(String msg);
     }
 
+    /**
+     * Alias de compatibilité — l'ancien code utilise OnDownloadCallback avec onSuccess/onFailure.
+     * @deprecated Utiliser DownloadCallback (onDone/onError) dans le nouveau code.
+     */
+    public interface OnDownloadCallback {
+        void onSuccess();
+        void onFailure(String msg);
+    }
+
+
     /** Progress détaillé pendant le téléchargement des playlists */
     public interface DownloadCallback {
         void onProgress(String playlistName);
