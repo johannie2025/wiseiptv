@@ -3,6 +3,7 @@ package com.wdesign.wiseiptv.mobile.ui;
 import android.content.*;
 import android.os.*;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.View;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
@@ -25,27 +26,26 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
-    // Extras reçus depuis ActivationActivity
     public static final String EXTRA_ACT_LOGIN        = "act_login";
     public static final String EXTRA_ACT_PASSWORD     = "act_password";
     public static final String EXTRA_ACT_EXPIRES      = "act_expires";
     public static final String EXTRA_ACT_DNS_URLS     = "act_dns_urls";
     public static final String EXTRA_ACT_DNS_EPG_URLS = "act_dns_epg_urls";
 
-    private RecyclerView        rvChannels;
-    private ChannelAdapter      adapter;
-    private ProgressBar         progressBar;
-    private TextView            tvEmpty;
-    private TabLayout           tabLayout;
+    private RecyclerView         rvChannels;
+    private ChannelAdapter       adapter;
+    private ProgressBar          progressBar;
+    private TextView             tvEmpty;
+    private TabLayout            tabLayout;
     private BottomNavigationView bottomNav;
-    private SearchView          searchView;
-    private Spinner             spinnerGroup;
-    private AppDatabase         db;
+    private SearchView           searchView;
+    private Spinner              spinnerGroup;
+    private AppDatabase          db;
 
     private int    currentTab   = 0;
     private String currentGroup = null;
 
-    // FIX : un seul observer LiveData actif à la fois
+    // Un seul observer LiveData actif à la fois (fix crash accumulation)
     private LiveData<List<ChannelEntity>> currentLiveData;
     private Observer<List<ChannelEntity>> currentObserver;
     private LiveData<List<String>>        currentGroupLiveData;
@@ -73,97 +73,14 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         setupSearch();
         setupBottomNav();
 
-        // ÉTAPE 1 : Traitement de la synchronisation d'activation ou vérification du cache local
+        // Affiche le cache local immédiatement
+        observeCurrentTab();
+
+        // Téléchargement en arrière-plan (non bloquant)
         startBackgroundSync();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GESTION DU CHARGEMENT DES DONNÉES ET ACTIVATION
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private void startBackgroundSync() {
-        Intent intent = getIntent();
-        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
-        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
-        String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
-        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
-        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
-
-        // Si on vient de cliquer sur "Accéder au contenu" dans ActivationActivity, on reçoit ces extras
-        if (login != null && dnsUrls != null && dnsUrls.length > 0) {
-            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
-            for (int i = 0; i < dnsUrls.length; i++) {
-                String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length) ? dnsEpgUrls[i] : "";
-                entries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
-            }
-            DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
-                    DeviceSecurity.getOrCreateKey(this), login, password != null ? password : "",
-                    expires != null ? expires : "", entries);
-            
-            launchDownload(result);
-            return;
-        }
-
-        // Sinon, c'est un démarrage normal de l'application (Vérification classique de la base de données)
-        Executors.newSingleThreadExecutor().execute(() -> {
-            List<PlaylistEntity> all = db.playlistDao().getAllSync();
-            runOnUiThread(() -> {
-                if (all.isEmpty()) {
-                    // FIX CRASH : L'affichage du Dialog doit impérativement se faire sur l'UI Thread
-                    showAddPlaylistDialog();
-                } else {
-                    // Des playlists existent → afficher le cache immédiatement
-                    observeCurrentTab();
-                    // Rafraîchir en background de manière transparente si obsolète (> 7 jours)
-                    PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
-                        @Override public void onDone(int count) {
-                            if (count > 0) runOnUiThread(() -> observeCurrentTab());
-                        }
-                        @Override public void onError(String msg) {}
-                    });
-                }
-            });
-        });
-    }
-
-    private void launchDownload(DeviceSecurity.ActivationResult result) {
-        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
-
-        Executors.newSingleThreadExecutor().execute(() -> {
-            // Sauvegarde les SharedPreferences et injecte / charge la playlist d'activation via PlaylistLoader
-            ActivationManager.checkAndSync(getApplicationContext(), new ActivationManager.OnResult() {
-                @Override
-                public void onActivated(DeviceSecurity.ActivationResult r) {
-                    runOnUiThread(() -> {
-                        if (isFinishing() || isDestroyed()) return;
-                        if (progressBar != null) progressBar.setVisibility(View.GONE);
-                        observeCurrentTab(); // Se déclenche dès que les chaînes commencent à arriver
-                        Toast.makeText(MainActivity.this, "Contenu activé avec succès !", Toast.LENGTH_SHORT).show();
-                    });
-                }
-
-                @Override
-                public void onExpired(String status) {
-                    runOnUiThread(() -> {
-                        if (progressBar != null) progressBar.setVisibility(View.GONE);
-                        Toast.makeText(MainActivity.this, "Compte expiré ou désactivé", Toast.LENGTH_LONG).show();
-                    });
-                }
-
-                @Override
-                public void onError(String msg) {
-                    runOnUiThread(() -> {
-                        if (progressBar != null) progressBar.setVisibility(View.GONE);
-                        Toast.makeText(MainActivity.this, "Erreur réseau: " + msg, Toast.LENGTH_LONG).show();
-                    });
-                }
-            });
-        });
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // GESTION SÉCURISÉE DES OBSERVERS (Un seul observer actif à la fois)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Observer unique ──────────────────────────────────────────────────────
 
     private void observeChannels(LiveData<List<ChannelEntity>> liveData) {
         if (currentLiveData != null && currentObserver != null)
@@ -188,15 +105,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             case 3: observeGroups(db.channelDao().getSeriesGroups()); break;
             default: updateGroupSpinner(null); break;
         }
-
         if (currentGroup != null) {
             switch (currentTab) {
-                case 1: observeChannels(db.channelDao().getLiveByGroup(currentGroup));  return;
-                case 2: observeChannels(db.channelDao().getFilmsByGroup(currentGroup)); return;
-                case 3: observeChannels(db.channelDao().getSeriesByGroup(currentGroup));return;
+                case 1: observeChannels(db.channelDao().getLiveByGroup(currentGroup));   return;
+                case 2: observeChannels(db.channelDao().getFilmsByGroup(currentGroup));  return;
+                case 3: observeChannels(db.channelDao().getSeriesByGroup(currentGroup)); return;
             }
         }
-
         switch (currentTab) {
             case 0: observeChannels(db.channelDao().getAll());       break;
             case 1: observeChannels(db.channelDao().getLive());      break;
@@ -212,9 +127,102 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // COMPOSANTS COMPORTEMENTAUX (TABS / SEARCH / BOTTOMNAV / SPINNER)
-    // ─────────────────────────────────────────────────────────────────────────
+    // ── Téléchargement arrière-plan ──────────────────────────────────────────
+
+    private void startBackgroundSync() {
+        Intent intent = getIntent();
+        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
+        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
+        String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
+        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
+        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
+
+        // Chemin 1 : extras frais depuis ActivationActivity
+        if (login != null && dnsUrls != null && dnsUrls.length > 0) {
+            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
+            for (int i = 0; i < dnsUrls.length; i++) {
+                String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length) ? dnsEpgUrls[i] : "";
+                entries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
+            }
+            DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
+                    DeviceSecurity.getOrCreateKey(this),
+                    login, password != null ? password : "",
+                    expires  != null ? expires  : "", entries);
+            launchDownload(result);
+            return;
+        }
+
+        // Chemin 2 : retour arrière / rotation — reconstruire depuis prefs+BDD
+        SharedPreferences prefs = getSharedPreferences("wise_activation", Context.MODE_PRIVATE);
+        String savedStatus  = prefs.getString("status",   "UNKNOWN");
+        String savedLogin   = prefs.getString("login",    null);
+        String savedPass    = prefs.getString("password", "");
+        String savedExpires = prefs.getString("expires_at", "");
+
+        if ("ACTIVE".equals(savedStatus) && savedLogin != null) {
+            final String fLogin = savedLogin, fPass = savedPass, fExpires = savedExpires;
+            Executors.newSingleThreadExecutor().execute(() -> {
+                List<PlaylistEntity> all = db.playlistDao().getAllSync();
+                List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
+                boolean anyStale = false;
+                for (PlaylistEntity pl : all) {
+                    if (pl.isActive && pl.type == PlaylistEntity.TYPE_XTREAM) {
+                        entries.add(new DeviceSecurity.DnsEntry(pl.url, "", entries.size()));
+                        if (PlaylistLoader.needsRefresh(pl)) anyStale = true;
+                    }
+                }
+                if (!entries.isEmpty() && anyStale) {
+                    DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
+                            DeviceSecurity.getOrCreateKey(this), fLogin, fPass, fExpires, entries);
+                    runOnUiThread(() -> launchDownload(result));
+                }
+            });
+            return;
+        }
+
+        // Chemin 3 : playlists manuelles
+        PlaylistLoader.refreshStaleIfNeeded(db, null);
+    }
+
+    private void launchDownload(DeviceSecurity.ActivationResult result) {
+        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+
+        ActivationManager.upsertAndDownloadAll(
+            getApplicationContext(), db, result,
+            new ActivationManager.DownloadCallback() {
+                @Override public void onProgress(String playlistName) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        // Feedback discret — pas de blocage UI
+                        if (tvEmpty != null) tvEmpty.setText("📥 " + playlistName + "…");
+                    });
+                }
+                @Override public void onDone(int totalChannels) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (progressBar != null) progressBar.setVisibility(View.GONE);
+                        if (tvEmpty != null) tvEmpty.setText("");
+                        observeCurrentTab();
+                        if (totalChannels > 0)
+                            Toast.makeText(MainActivity.this,
+                                "✅ " + totalChannels + " chaînes chargées",
+                                Toast.LENGTH_SHORT).show();
+                    });
+                }
+                @Override public void onError(String msg) {
+                    // Erreur non bloquante : UI reste accessible avec le cache
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        if (progressBar != null) progressBar.setVisibility(View.GONE);
+                        if (tvEmpty != null) tvEmpty.setText("");
+                        observeCurrentTab();
+                        Log.w("MainActivity", "Download non-fatal: " + msg);
+                    });
+                }
+            });
+    }
+
+    // ── Tabs / Search / BottomNav / Spinner ──────────────────────────────────
 
     private void setupTabs() {
         String[] tabs = {"Tout", "Live", "Films", "Séries", "Favoris"};
@@ -271,16 +279,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         });
     }
 
+    // ── Ajout manuel de playlist ─────────────────────────────────────────────
+
     public void showAddPlaylistDialog() {
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
         b.setTitle("Ajouter une playlist");
         android.view.View v = getLayoutInflater().inflate(R.layout.dialog_add_playlist, null);
-        EditText etName    = v.findViewById(R.id.et_playlist_name);
-        EditText etUrl     = v.findViewById(R.id.et_playlist_url);
-        EditText etServer  = v.findViewById(R.id.et_xtream_server);
-        EditText etUser    = v.findViewById(R.id.et_xtream_user);
-        EditText etPass    = v.findViewById(R.id.et_xtream_pass);
-        RadioGroup rgType  = v.findViewById(R.id.rg_type);
+        EditText etName   = v.findViewById(R.id.et_playlist_name);
+        EditText etUrl    = v.findViewById(R.id.et_playlist_url);
+        EditText etServer = v.findViewById(R.id.et_xtream_server);
+        EditText etUser   = v.findViewById(R.id.et_xtream_user);
+        EditText etPass   = v.findViewById(R.id.et_xtream_pass);
+        RadioGroup rgType = v.findViewById(R.id.rg_type);
         android.view.View layoutXtream = v.findViewById(R.id.layout_xtream);
 
         rgType.setOnCheckedChangeListener((g, checked) -> {
