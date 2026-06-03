@@ -199,17 +199,18 @@ private void observeCurrentTab() {
         PlaylistLoader.refreshStaleIfNeeded(db, null);
     }
 
-    private void launchDownload(DeviceSecurity.ActivationResult result) {
+private void launchDownload(DeviceSecurity.ActivationResult result) {
     if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
 
-    // Utilisation de la méthode native existante dans ton ActivationManager
+    // ÉVITE LE CRASH : On utilise la méthode checkAndSync qui est réellement 
+    // présente et déclarée dans ton ActivationManager.java
     ActivationManager.checkAndSync(getApplicationContext(), new ActivationManager.OnResult() {
         @Override
         public void onActivated(DeviceSecurity.ActivationResult r) {
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 if (progressBar != null) progressBar.setVisibility(View.GONE);
-                observeCurrentTab();
+                observeCurrentTab(); // Rafraîchit l'affichage avec les chaînes chargées
                 Toast.makeText(MainActivity.this, "✅ Chaînes synchronisées !", Toast.LENGTH_SHORT).show();
             });
         }
@@ -218,7 +219,7 @@ private void observeCurrentTab() {
         public void onExpired(String status) {
             runOnUiThread(() -> {
                 if (progressBar != null) progressBar.setVisibility(View.GONE);
-                Toast.makeText(MainActivity.this, "❌ Compte expiré : " + status, Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "❌ Compte expiré ou désactivé", Toast.LENGTH_LONG).show();
             });
         }
 
@@ -226,7 +227,7 @@ private void observeCurrentTab() {
         public void onError(String msg) {
             runOnUiThread(() -> {
                 if (progressBar != null) progressBar.setVisibility(View.GONE);
-                Toast.makeText(MainActivity.this, "⚠️ Erreur : " + msg, Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "⚠️ Erreur de synchronisation : " + msg, Toast.LENGTH_LONG).show();
             });
         }
     });
