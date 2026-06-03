@@ -10,8 +10,8 @@
     <application
         android:name=".WiseIptvTvApp"
         android:allowBackup="false"
-        android:banner="@drawable/ic_channel_placeholder"
-        android:icon="@drawable/ic_channel_placeholder"
+        android:banner="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.WiseIPTV.TV"
         android:usesCleartextTraffic="true">

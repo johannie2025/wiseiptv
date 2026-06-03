@@ -9,7 +9,9 @@
         android:layout_weight="1" android:orientation="vertical"
         android:gravity="center_vertical" android:paddingEnd="32dp">
 
-        <ImageView android:layout_width="80dp" android:layout_height="80dp"
+        <ImageView android:id="@+id/img_logo"
+        android:layout_width="80dp" android:layout_height="80dp"
+        android:src="@mipmap/ic_launcher"
             android:src="@drawable/ic_channel_placeholder" android:scaleType="fitCenter"
             android:layout_marginBottom="16dp"/>
 

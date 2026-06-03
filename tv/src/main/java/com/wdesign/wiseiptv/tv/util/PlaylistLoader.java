@@ -1,6 +1,5 @@
 package com.wdesign.wiseiptv.tv.util;
 
-import android.net.Uri;
 import android.util.Log;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
@@ -11,26 +10,16 @@ import java.net.*;
 import java.util.List;
 import java.util.concurrent.Executors;
 
-/**
- * PlaylistLoader TV — supporte String URL (ancien) ET PlaylistEntity (nouveau).
- * Les deux signatures coexistent pour compatibilité TvMainActivity et PlaylistManagerActivity.
- */
 public class PlaylistLoader {
     private static final String TAG = "TvPlaylistLoader";
+
     public interface Callback { void onDone(int count); void onError(String msg); }
 
-    /** Charger depuis une PlaylistEntity (URL M3U, fichier local, Xtream) */
     public static void load(PlaylistEntity pl, AppDatabase db, Callback cb) {
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
-                List<ChannelEntity> list;
-                if (pl.type == PlaylistEntity.TYPE_XTREAM) {
-                    list = loadXtream(pl);
-                } else {
-                    InputStream is = openStream(pl);
-                    list = M3UParser.parse(is);
-                    is.close();
-                }
+                List<ChannelEntity> list = pl.type == PlaylistEntity.TYPE_XTREAM
+                    ? loadXtreamSync(pl) : loadUrlSync(pl);
                 if (list == null || list.isEmpty()) { cb.onError("Playlist vide"); return; }
                 for (ChannelEntity ch : list) ch.playlistId = pl.id;
                 db.runInTransaction(() -> {
@@ -40,70 +29,70 @@ public class PlaylistLoader {
                 db.playlistDao().updateTimestamp(pl.id, System.currentTimeMillis());
                 cb.onDone(list.size());
             } catch (Exception e) {
-                Log.e(TAG, "" + e.getMessage(), e);
+                Log.e(TAG, e.getMessage(), e);
                 cb.onError(e.getMessage() != null ? e.getMessage() : "Erreur");
             }
         });
     }
 
-    /** Charger depuis une URL simple (compatibilité TvMainActivity) */
+    public static List<ChannelEntity> loadXtreamSync(PlaylistEntity pl) throws IOException {
+        String base = pl.url.trim();
+        if (!base.endsWith("/")) base += "/";
+        String url = base + "get.php?username=" + pl.username
+            + "&password=" + pl.password + "&type=m3u_plus&output=ts";
+        return parseUrl(url);
+    }
+
+    public static List<ChannelEntity> loadUrlSync(PlaylistEntity pl) throws IOException {
+        String url = pl.url;
+        if (url.startsWith("file://") || url.startsWith("/")) {
+            InputStream is = new FileInputStream(url.replace("file://", ""));
+            List<ChannelEntity> l = M3UParser.parse(is); is.close(); return l;
+        }
+        return parseUrl(url);
+    }
+
     public static void load(String url, AppDatabase db, Callback cb) {
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
-                InputStream is;
-                if (url.startsWith("content://")) {
-                    // URI Android (fichier local)
-                    is = null; // Nécessite Context — utilisez load(PlaylistEntity) à la place
-                    cb.onError("Utilisez load(PlaylistEntity) pour les fichiers locaux");
-                    return;
-                } else {
-                    HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-                    c.setConnectTimeout(15_000); c.setReadTimeout(60_000);
-                    c.setRequestProperty("User-Agent", "WiseIPTV/2.0");
-                    if (c.getResponseCode() != 200) { cb.onError("HTTP " + c.getResponseCode()); return; }
-                    is = c.getInputStream();
-                }
-                List<ChannelEntity> list = M3UParser.parse(is);
-                is.close();
+                List<ChannelEntity> list = parseUrl(url);
                 if (list.isEmpty()) { cb.onError("Playlist vide"); return; }
                 db.runInTransaction(() -> { db.channelDao().deleteAll(); db.channelDao().insertAll(list); });
                 cb.onDone(list.size());
-            } catch (Exception e) {
-                Log.e(TAG, "" + e.getMessage(), e);
-                cb.onError(e.getMessage() != null ? e.getMessage() : "Erreur");
-            }
+            } catch (Exception e) { cb.onError(e.getMessage()); }
         });
     }
 
-    private static InputStream openStream(PlaylistEntity pl) throws IOException {
-        String url = pl.url;
-        if (url.startsWith("content://")) {
-            // URI persistante Android (fichier local sélectionné)
-            // Nécessite Context → déléguer à load(PlaylistEntity, Context, db, cb)
-            throw new IOException("Fichier local: utilisez load avec Context");
-        }
-        if (url.startsWith("file://") || url.startsWith("/")) {
-            return new FileInputStream(url.replace("file://", ""));
-        }
+    private static List<ChannelEntity> parseUrl(String url) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(15_000); c.setReadTimeout(60_000);
-        c.setRequestProperty("User-Agent", "WiseIPTV/2.0");
-        if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
-        return c.getInputStream();
-    }
-
-    private static List<ChannelEntity> loadXtream(PlaylistEntity pl) throws IOException {
-        String base = pl.url.trim();
-        if (!base.endsWith("/")) base += "/";
-        String m3uUrl = base + "get.php?username=" + pl.username + "&password=" + pl.password
-                + "&type=m3u_plus&output=ts";
-        HttpURLConnection c = (HttpURLConnection) new URL(m3uUrl).openConnection();
         c.setConnectTimeout(15_000); c.setReadTimeout(120_000);
         c.setRequestProperty("User-Agent", "WiseIPTV/2.0");
-        if (c.getResponseCode() != 200) throw new IOException("Xtream HTTP " + c.getResponseCode());
+        if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
         InputStream is = c.getInputStream();
-        List<ChannelEntity> list = M3UParser.parse(is);
-        is.close();
-        return list;
+        List<ChannelEntity> l = M3UParser.parse(is); is.close(); return l;
+    }
+
+    public static void refreshStaleIfNeeded(AppDatabase db, Callback cb) {
+        Executors.newSingleThreadExecutor().execute(() -> {
+            java.util.List<PlaylistEntity> all = db.playlistDao().getAllSync();
+            int total = 0;
+            for (PlaylistEntity pl : all) {
+                if (!pl.isActive) continue;
+                long age = System.currentTimeMillis() - pl.lastUpdated;
+                if (age < PlaylistEntity.REFRESH_INTERVAL_MS) continue;
+                try {
+                    java.util.List<ChannelEntity> list = pl.type == PlaylistEntity.TYPE_XTREAM
+                        ? loadXtreamSync(pl) : loadUrlSync(pl);
+                    if (list != null && !list.isEmpty()) {
+                        for (ChannelEntity ch : list) ch.playlistId = pl.id;
+                        final java.util.List<ChannelEntity> fl = list; final long fid = pl.id;
+                        db.runInTransaction(() -> { db.channelDao().deleteByPlaylist(fid); db.channelDao().insertAll(fl); });
+                        db.playlistDao().updateTimestamp(pl.id, System.currentTimeMillis());
+                        total += list.size();
+                    }
+                } catch (Exception e) { Log.w(TAG, "refresh: " + e.getMessage()); }
+            }
+            if (cb != null && total > 0) cb.onDone(total);
+        });
     }
 }
