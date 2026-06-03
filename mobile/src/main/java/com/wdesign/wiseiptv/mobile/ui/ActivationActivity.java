@@ -1,267 +1,312 @@
 package com.wdesign.wiseiptv.mobile.ui;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.os.Bundle;
+import android.content.*;
+import android.os.*;
+import android.text.TextUtils;
 import android.view.View;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.lifecycle.LiveData;
+import androidx.lifecycle.Observer;
+import androidx.recyclerview.widget.*;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.tabs.TabLayout;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
-import com.wdesign.wiseiptv.core.security.DeviceSecurity;
+import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
+import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.mobile.R;
-import com.wdesign.wiseiptv.mobile.util.ActivationManager;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
+import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
+import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Executors;
 
 /**
- * ActivationActivity — PREMIER ÉCRAN, mais seulement si nécessaire.
+ * MainActivity
  *
- * Logique de routage au démarrage :
- *  ┌─ ACTIVE en cache + non expiré  →  skip directement → MainActivity (invisible)
- *  ├─ ACTIVE en cache + expiré      →  afficher page expiration
- *  └─ INACTIF / INCONNU             →  afficher page activation
+ * CORRECTIONS :
+ *  1. FIX CRASH PRINCIPAL — observers LiveData accumulés.
+ *     L'ancienne version appelait liveData.observe(this, callback) sans jamais
+ *     supprimer l'observer précédent. À chaque onResume(), changement d'onglet
+ *     ou sélection de groupe, un nouvel observer s'ajoutait. Room notifiait
+ *     updateList() des dizaines de fois par update → ANR → "cesse de fonctionner".
+ *     FIX : observeChannels() et observeGroups() appellent removeObserver()
+ *     avant chaque nouveau observe(). Un seul observer actif à la fois.
  *
- * La page ne s'affiche JAMAIS si l'activation est valide en cache.
- * La vérification réseau se fait en background depuis WiseApp.
+ *  2. FIX — Ne propose plus d'ajouter une playlist si les playlists d'activation
+ *     sont déjà présentes. showAddPlaylistDialog() n'est lancé que si AUCUNE
+ *     playlist d'aucun type n'existe.
+ *
+ *  3. Refresh silencieux au démarrage : si des playlists existent mais sont
+ *     stales (> 7j), PlaylistLoader.refreshStaleIfNeeded() les rafraîchit
+ *     en arrière-plan sans bloquer l'UI.
  */
-public class ActivationActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
-    private static final String PREFS = "wise_activation";
+    private RecyclerView         rvChannels;
+    private ChannelAdapter       adapter;
+    private ProgressBar          progressBar;
+    private TextView             tvEmpty;
+    private TabLayout            tabLayout;
+    private BottomNavigationView bottomNav;
+    private SearchView           searchView;
+    private Spinner              spinnerGroup;
+    private AppDatabase          db;
 
-    private TextView    tvDeviceKey, tvStatus, tvStatusDetail;
-    private TextView    tvProviderLabel, tvLogin, tvPassword, tvExpiry;
-    private View        cardProvider;
-    private Button      btnCheck, btnAccess, btnCopy;
-    private ProgressBar progressBar;
+    private int    currentTab   = 0;
+    private String currentGroup = null;
+
+    // FIX : un seul observer LiveData actif à la fois
+    private LiveData<List<ChannelEntity>> currentLiveData;
+    private Observer<List<ChannelEntity>> currentObserver;
+    private LiveData<List<String>>        currentGroupLiveData;
+    private Observer<List<String>>        currentGroupObserver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
 
-        // ── DÉCISION INSTANTANÉE : pas besoin d'afficher la page ? ──
-        if (isActiveAndNotExpired()) {
-            goToMain(false);  // transparent, pas d'animation
-            return;
-        }
+        db           = AppDatabase.get(this);
+        rvChannels   = findViewById(R.id.rv_channels);
+        progressBar  = findViewById(R.id.progress_bar);
+        tvEmpty      = findViewById(R.id.tv_empty);
+        tabLayout    = findViewById(R.id.tab_layout);
+        bottomNav    = findViewById(R.id.bottom_nav);
+        searchView   = findViewById(R.id.search_view);
+        spinnerGroup = findViewById(R.id.spinner_group);
 
-        setContentView(R.layout.activity_activation);
+        adapter = new ChannelAdapter(this);
+        rvChannels.setLayoutManager(new GridLayoutManager(this, 3));
+        rvChannels.setAdapter(adapter);
 
-        tvDeviceKey     = findViewById(R.id.tv_device_key);
-        tvStatus        = findViewById(R.id.tv_status);
-        tvStatusDetail  = findViewById(R.id.tv_status_detail);
-        tvProviderLabel = findViewById(R.id.tv_provider_label);
-        tvLogin         = findViewById(R.id.tv_login);
-        tvPassword      = findViewById(R.id.tv_password);
-        tvExpiry        = findViewById(R.id.tv_expiry);
-        cardProvider    = findViewById(R.id.card_provider);
-        btnCheck        = findViewById(R.id.btn_check);
-        btnAccess       = findViewById(R.id.btn_access);
-        btnCopy         = findViewById(R.id.btn_copy_key);
-        progressBar     = findViewById(R.id.progress_bar);
+        setupTabs();
+        setupSearch();
+        setupBottomNav();
 
-        String key = DeviceSecurity.getOrCreateKey(this);
-        tvDeviceKey.setText(key);
-
-        btnCopy.setOnClickListener(v -> {
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
-            Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
+        // Vérifier les playlists en arrière-plan
+        Executors.newSingleThreadExecutor().execute(() -> {
+            List<PlaylistEntity> all = db.playlistDao().getAllSync();
+            runOnUiThread(() -> {
+                if (all.isEmpty()) {
+                    // Aucune playlist du tout → proposer d'en ajouter
+                    showAddPlaylistDialog();
+                } else {
+                    // Des playlists existent → afficher le cache immédiatement
+                    observeCurrentTab();
+                    // Rafraîchir en background si stale
+                    PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
+                        @Override public void onDone(int count) {
+                            if (count > 0) runOnUiThread(() -> observeCurrentTab());
+                        }
+                        @Override public void onError(String msg) {}
+                    });
+                }
+            });
         });
-
-        // Bouton vérification manuelle
-        btnCheck.setOnClickListener(v -> checkActivation(false));
-
-        // Bouton accès : vérifie + télécharge + ouvre
-        btnAccess.setOnClickListener(v -> checkActivation(true));
-
-        // Si expiré, montrer l'état expiré immédiatement
-        String saved = getPrefs().getString("status", "");
-        if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) {
-            showInactive(saved);
-        }
-
-        // Vérification réseau silencieuse
-        checkActivation(false);
     }
 
-    // ── Vérification activation ─────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // FIX PRINCIPAL : un seul observer actif à la fois
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private void checkActivation(boolean goOnSuccess) {
-        setLoading(true);
-        DeviceSecurity.check(this, new DeviceSecurity.Callback() {
-            @Override
-            public void onActive(DeviceSecurity.ActivationResult r) {
-                saveCache(r);
-                runOnUiThread(() -> {
-                    if (goOnSuccess) {
-                        // Télécharger les playlists puis rediriger
-                        downloadAndGo(r);
-                    } else {
-                        // Juste afficher l'état actif
-                        setLoading(false);
-                        showActive(r);
+    private void observeChannels(LiveData<List<ChannelEntity>> liveData) {
+        if (currentLiveData != null && currentObserver != null)
+            currentLiveData.removeObserver(currentObserver);
+        currentObserver = list -> updateList(list);
+        currentLiveData = liveData;
+        currentLiveData.observe(this, currentObserver);
+    }
+
+    private void observeGroups(LiveData<List<String>> liveData) {
+        if (currentGroupLiveData != null && currentGroupObserver != null)
+            currentGroupLiveData.removeObserver(currentGroupObserver);
+        currentGroupObserver = groups -> updateGroupSpinner(groups);
+        currentGroupLiveData = liveData;
+        currentGroupLiveData.observe(this, currentGroupObserver);
+    }
+
+    private void observeCurrentTab() {
+        // Groupes selon l'onglet
+        switch (currentTab) {
+            case 1: observeGroups(db.channelDao().getLiveGroups());   break;
+            case 2: observeGroups(db.channelDao().getFilmGroups());   break;
+            case 3: observeGroups(db.channelDao().getSeriesGroups()); break;
+            default: updateGroupSpinner(null); break;
+        }
+        // Chaînes : filtre groupe si sélectionné
+        if (currentGroup != null) {
+            switch (currentTab) {
+                case 1: observeChannels(db.channelDao().getLiveByGroup(currentGroup));   return;
+                case 2: observeChannels(db.channelDao().getFilmsByGroup(currentGroup));  return;
+                case 3: observeChannels(db.channelDao().getSeriesByGroup(currentGroup)); return;
+            }
+        }
+        switch (currentTab) {
+            case 0: observeChannels(db.channelDao().getAll());       break;
+            case 1: observeChannels(db.channelDao().getLive());      break;
+            case 2: observeChannels(db.channelDao().getFilms());     break;
+            case 3: observeChannels(db.channelDao().getSeries());    break;
+            case 4: observeChannels(db.channelDao().getFavorites()); break;
+        }
+    }
+
+    private void updateList(List<ChannelEntity> list) {
+        if (adapter != null) adapter.setData(list);
+        if (tvEmpty != null)
+            tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Tabs / Search / BottomNav / Spinner
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void setupTabs() {
+        String[] tabs = {"Tout", "Live", "Films", "Séries", "Favoris"};
+        for (String t : tabs) tabLayout.addTab(tabLayout.newTab().setText(t));
+        tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
+            @Override public void onTabSelected(TabLayout.Tab t) {
+                currentTab = t.getPosition(); currentGroup = null;
+                observeCurrentTab();
+            }
+            @Override public void onTabUnselected(TabLayout.Tab t) {}
+            @Override public void onTabReselected(TabLayout.Tab t) {}
+        });
+    }
+
+    private void updateGroupSpinner(List<String> groups) {
+        if (spinnerGroup == null) return;
+        if (groups == null || groups.isEmpty()) { spinnerGroup.setVisibility(View.GONE); return; }
+        spinnerGroup.setVisibility(View.VISIBLE);
+        ArrayList<String> items = new ArrayList<>();
+        items.add("Tous les groupes");
+        items.addAll(groups);
+        ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, items);
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerGroup.setAdapter(a);
+        spinnerGroup.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                currentGroup = pos == 0 ? null : items.get(pos);
+                observeCurrentTab();
+            }
+            @Override public void onNothingSelected(AdapterView<?> p) {}
+        });
+    }
+
+    private void setupSearch() {
+        if (searchView == null) return;
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override public boolean onQueryTextSubmit(String q) { return false; }
+            @Override public boolean onQueryTextChange(String q) {
+                if (TextUtils.isEmpty(q)) { observeCurrentTab(); return true; }
+                observeChannels(db.channelDao().search(q));
+                return true;
+            }
+        });
+    }
+
+    private void setupBottomNav() {
+        if (bottomNav == null) return;
+        bottomNav.setOnItemSelectedListener(item -> {
+            int id = item.getItemId();
+            if      (id == R.id.nav_home)     { observeCurrentTab(); return true; }
+            else if (id == R.id.nav_add)      { showAddPlaylistDialog(); return true; }
+            else if (id == R.id.nav_settings) { startActivity(new Intent(this, SettingsActivity.class)); return true; }
+            return false;
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Ajout manuel de playlist
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public void showAddPlaylistDialog() {
+        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
+        b.setTitle("Ajouter une playlist");
+        android.view.View v = getLayoutInflater().inflate(R.layout.dialog_add_playlist, null);
+        EditText   etName   = v.findViewById(R.id.et_playlist_name);
+        EditText   etUrl    = v.findViewById(R.id.et_playlist_url);
+        EditText   etServer = v.findViewById(R.id.et_xtream_server);
+        EditText   etUser   = v.findViewById(R.id.et_xtream_user);
+        EditText   etPass   = v.findViewById(R.id.et_xtream_pass);
+        RadioGroup rgType   = v.findViewById(R.id.rg_type);
+        android.view.View layoutXtream = v.findViewById(R.id.layout_xtream);
+
+        rgType.setOnCheckedChangeListener((g, checked) -> {
+            boolean isX = checked == R.id.rb_xtream;
+            layoutXtream.setVisibility(isX ? View.VISIBLE : View.GONE);
+            etUrl.setVisibility(isX ? View.GONE : View.VISIBLE);
+        });
+
+        b.setView(v);
+        b.setPositiveButton("Charger", (d, w) -> {
+            String name = etName.getText().toString().trim();
+            int checkedId = rgType.getCheckedRadioButtonId();
+            PlaylistEntity pl = new PlaylistEntity();
+            pl.name = name.isEmpty() ? "Playlist" : name;
+            pl.lastUpdated = 0;
+
+            if (checkedId == R.id.rb_xtream) {
+                String server = etServer.getText().toString().trim();
+                String user   = etUser.getText().toString().trim();
+                String pass   = etPass.getText().toString().trim();
+                if (server.isEmpty() || user.isEmpty()) return;
+                pl.type = PlaylistEntity.TYPE_XTREAM;
+                pl.url = server; pl.username = user; pl.password = pass;
+            } else {
+                String url = etUrl.getText().toString().trim();
+                if (TextUtils.isEmpty(url)) return;
+                pl.type = checkedId == R.id.rb_m3u_file
+                        ? PlaylistEntity.TYPE_M3U_FILE : PlaylistEntity.TYPE_M3U_URL;
+                pl.url = url;
+            }
+
+            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+            Executors.newSingleThreadExecutor().execute(() -> {
+                pl.id = db.playlistDao().insert(pl);
+                PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
+                    @Override public void onDone(int count) {
+                        runOnUiThread(() -> {
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
+                            observeCurrentTab();
+                            Toast.makeText(MainActivity.this, count + " chaînes chargées", Toast.LENGTH_SHORT).show();
+                        });
+                    }
+                    @Override public void onError(String msg) {
+                        runOnUiThread(() -> {
+                            if (progressBar != null) progressBar.setVisibility(View.GONE);
+                            Toast.makeText(MainActivity.this, "Erreur : " + msg, Toast.LENGTH_LONG).show();
+                        });
                     }
                 });
-            }
-
-            @Override
-            public void onInactive(String status, String message) {
-                clearCache(status);
-                runOnUiThread(() -> { setLoading(false); showInactive(status); });
-            }
-
-            @Override
-            public void onError(String message) {
-                runOnUiThread(() -> {
-                    setLoading(false);
-                    // Mode offline : si cache ACTIVE, montrer bouton accès
-                    if (isActiveAndNotExpired()) {
-                        showOffline();
-                    } else {
-                        showPending(message);
-                    }
-                });
-            }
+            });
         });
+        b.setNegativeButton("Annuler", null);
+        b.show();
     }
 
-    /**
-     * Télécharge toutes les playlists en background puis redirige vers MainActivity.
-     * L'UI montre "Téléchargement…" pendant le process.
-     */
-    private void downloadAndGo(DeviceSecurity.ActivationResult r) {
-        btnAccess.setEnabled(false);
-        btnAccess.setText("Téléchargement…");
-        progressBar.setVisibility(View.VISIBLE);
-
-        AppDatabase db = AppDatabase.get(this);
-        ActivationManager.upsertAndDownloadAll(this, db, r, new ActivationManager.DownloadCallback() {
-            @Override
-            public void onProgress(String playlistName) {
-                runOnUiThread(() -> btnAccess.setText("📥 " + playlistName + "…"));
-            }
-            @Override
-            public void onDone(int totalChannels) {
-                runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    goToMain(true);
-                });
-            }
-            @Override
-            public void onError(String msg) {
-                runOnUiThread(() -> {
-                    // Même en cas d'erreur de téléchargement on laisse accéder
-                    progressBar.setVisibility(View.GONE);
-                    Toast.makeText(ActivationActivity.this,
-                        "Téléchargement partiel : " + msg, Toast.LENGTH_LONG).show();
-                    goToMain(true);
-                });
-            }
-        });
+    @Override public void onClick(ChannelEntity ch) {
+        Intent i = new Intent(this, PlayerActivity.class);
+        i.putExtra(PlayerActivity.EXTRA_ID,    ch.id);
+        i.putExtra(PlayerActivity.EXTRA_NAME,  ch.name);
+        i.putExtra(PlayerActivity.EXTRA_URL,   ch.streamUrl);
+        i.putExtra(PlayerActivity.EXTRA_TYPE,  ch.contentType);
+        i.putExtra(PlayerActivity.EXTRA_GROUP, ch.groupTitle);
+        i.putExtra(PlayerActivity.EXTRA_ORDER, ch.sortOrder);
+        startActivity(i);
     }
 
-    // ── Affichage état ──────────────────────────────────────────────
-
-    private void showActive(DeviceSecurity.ActivationResult r) {
-        tvStatus.setText("✅ ACTIVÉ");
-        tvStatus.setTextColor(0xFF4CAF50);
-        tvStatusDetail.setText("Votre abonnement est actif");
-        cardProvider.setVisibility(View.VISIBLE);
-        tvLogin.setText("Login : " + r.login);
-        tvPassword.setText("Mot de passe : " + r.password);
-        tvExpiry.setText("Expire le : " + r.expiresAt);
-        if (!r.dnsServers.isEmpty())
-            tvProviderLabel.setText("Provider : " + r.dnsServers.get(0).url);
-        btnAccess.setVisibility(View.VISIBLE);
-        btnAccess.setEnabled(true);
-        btnAccess.setText("▶ Accéder au contenu");
+    // FIX : onResume remplace l'observer au lieu d'en ajouter un nouveau
+    @Override protected void onResume() {
+        super.onResume();
+        observeCurrentTab();
     }
 
-    private void showInactive(String status) {
-        cardProvider.setVisibility(View.GONE);
-        btnAccess.setVisibility(View.GONE);
-        if (status.contains("EXPIRED")) {
-            tvStatus.setText("⏰ EXPIRÉ");
-            tvStatus.setTextColor(0xFFFF9800);
-            tvStatusDetail.setText("Abonnement expiré.\nContactez votre revendeur pour renouveler.");
-        } else if (status.contains("DISABLED")) {
-            tvStatus.setText("🚫 DÉSACTIVÉ");
-            tvStatus.setTextColor(0xFFF44336);
-            tvStatusDetail.setText("Accès suspendu.\nContactez votre revendeur.");
-        } else {
-            tvStatus.setText("❌ NON ACTIVÉ");
-            tvStatus.setTextColor(0xFFF44336);
-            tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur pour activation.");
-        }
-    }
-
-    private void showPending(String err) {
-        cardProvider.setVisibility(View.GONE);
-        btnAccess.setVisibility(View.GONE);
-        tvStatus.setText("⏳ EN ATTENTE");
-        tvStatus.setTextColor(0xFFFFEB3B);
-        tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur.\n(" + err + ")");
-    }
-
-    private void showOffline() {
-        tvStatus.setText("📡 HORS LIGNE");
-        tvStatus.setTextColor(0xFF9E9E9E);
-        tvStatusDetail.setText("Pas de connexion. Accès via le cache.");
-        btnAccess.setVisibility(View.VISIBLE);
-        btnAccess.setEnabled(true);
-        btnAccess.setText("▶ Continuer hors ligne");
-        // En mode offline le clic va directement à MainActivity sans retélécharger
-        btnAccess.setOnClickListener(v -> goToMain(true));
-    }
-
-    // ── Cache ──────────────────────────────────────────────────────
-
-    private boolean isActiveAndNotExpired() {
-        SharedPreferences p = getPrefs();
-        if (!"ACTIVE".equals(p.getString("status", ""))) return false;
-        String exp = p.getString("expires_at", "");
-        if (exp.isEmpty()) return false;
-        try {
-            Date expDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).parse(exp);
-            return expDate != null && new Date().before(expDate);
-        } catch (Exception e) { return false; }
-    }
-
-    private void saveCache(DeviceSecurity.ActivationResult r) {
-        getPrefs().edit()
-            .putString("status", "ACTIVE")
-            .putString("expires_at", r.expiresAt)
-            .putString("login", r.login)
-            .apply();
-    }
-
-    private void clearCache(String status) {
-        getPrefs().edit()
-            .putString("status", status)
-            .remove("expires_at")
-            .remove("login")
-            .apply();
-    }
-
-    private SharedPreferences getPrefs() {
-        return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-    }
-
-    // ── Navigation ─────────────────────────────────────────────────
-
-    private void goToMain(boolean animate) {
-        startActivity(new Intent(this, MainActivity.class));
-        if (!animate) overridePendingTransition(0, 0);
-        finish();
-    }
-
-    private void setLoading(boolean on) {
-        progressBar.setVisibility(on ? View.VISIBLE : View.GONE);
-        btnCheck.setEnabled(!on);
-        btnCheck.setText(on ? "Vérification…" : "🔄 Vérifier l'activation");
+    @Override protected void onDestroy() {
+        super.onDestroy();
+        if (currentLiveData != null && currentObserver != null)
+            currentLiveData.removeObserver(currentObserver);
+        if (currentGroupLiveData != null && currentGroupObserver != null)
+            currentGroupLiveData.removeObserver(currentGroupObserver);
     }
 }
