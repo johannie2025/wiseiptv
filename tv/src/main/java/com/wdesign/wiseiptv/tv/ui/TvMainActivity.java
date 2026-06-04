@@ -508,27 +508,67 @@ private void processNextDns(int index, String[] dnsUrls, String login, String pa
 }
 
     /** Retrouve ou crée la PlaylistEntity pour un DNS donné */
-    private PlaylistEntity findOrCreatePlaylist(String login, String password,
-                                                  String dnsUrl, int idx) {
-        // Chercher par URL + login dans la DB
-        PlaylistEntity existing = db.playlistDao().findByUrlAndLogin(dnsUrl, login);
-        if (existing != null) {
-            existing.password = password;
-            existing.isActive = true;
-            db.playlistDao().update(existing);
-            return existing;
-        }
-        PlaylistEntity pl = new PlaylistEntity();
-        pl.name = "IPTV #" + idx;
+   /** Retrouve ou crée la PlaylistEntity avec détection automatique du type */
+private PlaylistEntity findOrCreatePlaylist(String login, String password,
+                                              String dnsUrl, int idx) {
+    // Chercher par URL + login
+    PlaylistEntity existing = db.playlistDao().findByUrlAndLogin(dnsUrl, login);
+    if (existing != null) {
+        existing.password = password;
+        existing.isActive = true;
+        db.playlistDao().update(existing);
+        return existing;
+    }
+
+    PlaylistEntity pl = new PlaylistEntity();
+    pl.name = "IPTV #" + idx;
+    pl.url = dnsUrl.trim();
+    pl.isActive = true;
+    pl.lastUpdated = 0;
+
+    // === DÉTECTION AUTOMATIQUE DU TYPE ===
+    if (isXtreamUrl(pl.url)) {
         pl.type = PlaylistEntity.TYPE_XTREAM;
-        pl.url = dnsUrl;
         pl.username = login;
         pl.password = password;
-        pl.isActive = true;
-        pl.lastUpdated = 0;
-        pl.id = db.playlistDao().insert(pl);
-        return pl;
+        Log.d(TAG, "Détecté comme Xtream: " + pl.url);
+    } else {
+        pl.type = PlaylistEntity.TYPE_M3U_URL;
+        // Pour les M3U classiques, on n'a pas besoin de login/password
+        pl.username = "";
+        pl.password = "";
+        Log.d(TAG, "Détecté comme M3U simple: " + pl.url);
     }
+
+    pl.id = db.playlistDao().insert(pl);
+    return pl;
+}
+
+/** Détection intelligente du type de playlist */
+private boolean isXtreamUrl(String url) {
+    if (url == null || url.isEmpty()) return false;
+    String lower = url.toLowerCase();
+
+    // Cas très clair
+    if (lower.contains("/get.php") || 
+        lower.contains("/player_api.php") || 
+        lower.contains("/apiget.php") ||
+        lower.contains("/panel_api.php")) {
+        return true;
+    }
+
+    // Format Xtream alternatif : domaine/username/password/...
+    if (lower.matches(".*https?://.+/[^/]+/[^/]+/(m3u_plus|m3u|ts).*")) {
+        return true;
+    }
+
+    // Si l'URL contient "username=" et "password=", très probablement Xtream
+    if (lower.contains("username=") && lower.contains("password=")) {
+        return true;
+    }
+
+    return false;
+}
 
     // ── Sync manuelle (bouton 🔄) ─────────────────────────────────
 
