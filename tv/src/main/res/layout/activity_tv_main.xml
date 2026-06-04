@@ -16,6 +16,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+	android:descendantFocusability="afterDescendants"
     android:background="@color/wise_bg">
 
     <!-- BrowseFragment occupe tout l'écran -->
@@ -23,12 +24,14 @@
         android:id="@+id/browse_fragment"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+		android:focusable="false"
         android:paddingTop="68dp"/>
 
     <!-- Barre supérieure custom — même hauteur que la barre Leanback (~68dp) -->
     <LinearLayout
         android:id="@+id/top_bar"
         android:layout_width="match_parent"
+		android:focusable="false"
         android:layout_height="68dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
@@ -43,6 +46,7 @@
             android:layout_height="44dp"
             android:src="@mipmap/ic_launcher"
             android:scaleType="fitCenter"
+			android:focusable="false"
             android:layout_marginEnd="10dp"/>
 
         <!-- Titre -->
@@ -51,6 +55,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="Wise IPTV"
+			android:focusable="false"
             android:textColor="#FFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"/>

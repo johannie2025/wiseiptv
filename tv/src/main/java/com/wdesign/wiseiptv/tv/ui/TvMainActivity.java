@@ -69,7 +69,7 @@ public class TvMainActivity extends FragmentActivity {
         startBackgroundSync();
     }
 
-// ── BrowseFragment ────────────────────────────────────────────
+// ── BrowseFragment — Version Nettoyée et Sans Loupe Native ─────────────────
     private void setupBrowseFragment() {
         browseFragment = (BrowseSupportFragment)
             getSupportFragmentManager().findFragmentById(R.id.browse_fragment);
@@ -79,21 +79,15 @@ public class TvMainActivity extends FragmentActivity {
                 .add(R.id.browse_fragment, browseFragment).commit();
         }
 
-        // ── FIX TV : Masquer complètement l'en-tête vertical gauche natif ──
-        // Désactive l'affichage de la colonne des catégories native de Leanback
+        // Masquer complètement l'en-tête vertical gauche natif
         browseFragment.setHeadersState(BrowseSupportFragment.HEADERS_DISABLED);
-        // Empêche le retour automatique vers l'en-tête lors de l'appui sur le bouton "Retour" de la télécommande
         browseFragment.setHeadersTransitionOnBackEnabled(false);
 
-        // Titre vide — notre barre custom le remplace
         browseFragment.setTitle("");
         browseFragment.setBrandColor(getResources().getColor(R.color.wise_brand, getTheme()));
 
-        // FIX : icône recherche native Leanback désactivée visuellement
-        // On garde setOnSearchClickedListener pour la loupe mais elle appelle notre dialog
-        browseFragment.setOnSearchClickedListener(v -> showSearchDialog());
-        // Couleur = transparente pour masquer la loupe Leanback (notre barre la remplace)
-        browseFragment.setSearchAffordanceColor(0x00000000);
+        // ⚠️ ENLEVÉ : Ne PAS appeler setOnSearchClickedListener(...) !
+        // Cela supprime définitivement le bouton de recherche natif Leanback du focus D-Pad.
 
         rowsAdapter = new ArrayObjectAdapter(new ListRowPresenter());
         browseFragment.setAdapter(rowsAdapter);
@@ -335,7 +329,20 @@ public class TvMainActivity extends FragmentActivity {
     // Chaque DNS → PlaylistEntity en DB → PlaylistLoader.load() séquentiel.
     // Les LiveData observers affichent les chaînes dès que chaque DNS est chargé.
 
+   // ── Sync background — Limité à 1 fois par semaine ──────────────────────────
     private void startBackgroundSync() {
+        SharedPreferences prefs = getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE);
+        
+        // Vérification de la date de dernière synchronisation réussie
+        long lastSync = prefs.getLong("last_weekly_sync_timestamp", 0);
+        long currentTime = System.currentTimeMillis();
+        long oneWeekInMs = 7L * 24 * 60 * 60 * 1000; // 7 jours
+
+        if (currentTime - lastSync < oneWeekInMs) {
+            Log.d(TAG, "Sync ignoré : Dernière synchronisation datant de moins d'une semaine.");
+            return; // L'application s'ouvre instantanément sans retélécharger
+        }
+
         Intent intent = getIntent();
         String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
         String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
@@ -343,17 +350,13 @@ public class TvMainActivity extends FragmentActivity {
         String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
         String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
 
-        // Chemin 1 : extras depuis TvActivationActivity
         if (login != null && dnsUrls != null && dnsUrls.length > 0) {
-            Log.d(TAG, "Sync ch1: extras DNS=" + dnsUrls.length);
             loadDnsSequentially(login, password != null ? password : "",
                 expires != null ? expires : "", dnsUrls,
                 dnsEpgUrls != null ? dnsEpgUrls : new String[0]);
             return;
         }
 
-        // Chemin 2 : prefs sauvegardées par TvActivationActivity.saveCache()
-        SharedPreferences prefs = getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE);
         String savedStatus = prefs.getString("status",     "UNKNOWN");
         String savedLogin  = prefs.getString("login",      null);
         String savedPass   = prefs.getString("password",   "");
@@ -361,22 +364,10 @@ public class TvMainActivity extends FragmentActivity {
         String savedDnsRaw = prefs.getString("dns_urls",   "");
 
         if ("ACTIVE".equals(savedStatus) && savedLogin != null && !savedDnsRaw.isEmpty()) {
-            Log.d(TAG, "Sync ch2: prefs dns=" + savedDnsRaw);
             String[] urls = savedDnsRaw.split(",");
             String[] epgs = prefs.getString("dns_epg_urls", "").split(",");
             loadDnsSequentially(savedLogin, savedPass, savedExp, urls, epgs);
-            return;
         }
-
-        // Chemin 3 : playlists manuelles existantes (refresh si stale)
-        Log.d(TAG, "Sync ch3: stale refresh");
-        PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
-            @Override public void onDone(int c) {
-                runOnUiThread(() -> Toast.makeText(TvMainActivity.this,
-                    "✅ " + c + " chaînes", Toast.LENGTH_SHORT).show());
-            }
-            @Override public void onError(String msg) { Log.w(TAG, "stale: " + msg); }
-        });
     }
 
     /**
@@ -385,6 +376,7 @@ public class TvMainActivity extends FragmentActivity {
      * Les chaînes apparaissent dans l'interface dès que chaque DNS est chargé
      * (via LiveData observers dans observeAllRows).
      */
+// ── Chargement séquentiel corrigé ─────────────────────────────────────────
     private void loadDnsSequentially(String login, String password, String expires,
                                       String[] dnsUrls, String[] epgUrls) {
         showSyncStatus("Chargement…");
@@ -393,27 +385,18 @@ public class TvMainActivity extends FragmentActivity {
             for (int i = 0; i < dnsUrls.length; i++) {
                 String url = dnsUrls[i].trim();
                 if (url.isEmpty()) continue;
-                String epg = i < epgUrls.length ? epgUrls[i].trim() : "";
-
+                
                 final int idx = i + 1;
                 final int total = dnsUrls.length;
-                final String dnsUrl = url;
-
-                // Créer ou récupérer la PlaylistEntity pour ce DNS
                 PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
 
-                // Feedback UI
-                runOnUiThread(() -> showSyncStatus(
-                    "📥 DNS " + idx + "/" + total + " — " + pl.name));
+                runOnUiThread(() -> showSyncStatus("📥 DNS " + idx + "/" + total + " — " + pl.name));
 
-                // Téléchargement synchrone (on est déjà dans un thread bg)
                 try {
-                    List<com.wdesign.wiseiptv.core.db.entity.ChannelEntity> channels =
-                        PlaylistLoader.loadXtreamSync(pl);
+                    List<ChannelEntity> channels = PlaylistLoader.loadXtreamSync(pl);
                     if (channels != null && !channels.isEmpty()) {
-                        for (com.wdesign.wiseiptv.core.db.entity.ChannelEntity ch : channels)
-                            ch.playlistId = pl.id;
-                        final List<com.wdesign.wiseiptv.core.db.entity.ChannelEntity> fc = channels;
+                        for (ChannelEntity ch : channels) ch.playlistId = pl.id;
+                        final List<ChannelEntity> fc = channels;
                         final long fid = pl.id;
                         db.runInTransaction(() -> {
                             db.channelDao().deleteByPlaylist(fid);
@@ -421,11 +404,9 @@ public class TvMainActivity extends FragmentActivity {
                         });
                         db.playlistDao().updateTimestamp(pl.id, System.currentTimeMillis());
                         totalLoaded += channels.size();
-                        Log.d(TAG, "DNS " + idx + " OK: " + channels.size() + " chaînes");
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "DNS " + idx + " erreur: " + e.getMessage());
-                    // Continue vers le DNS suivant — pas d'arrêt sur erreur
+                    Log.w(TAG, "Erreur DNS " + idx + ": " + e.getMessage());
                 }
             }
 
@@ -434,13 +415,13 @@ public class TvMainActivity extends FragmentActivity {
                 hideSyncStatus();
                 if (ft > 0) {
                     Toast.makeText(this, "✅ " + ft + " chaînes chargées", Toast.LENGTH_SHORT).show();
-                } else {
-                    // Aucune chaîne → proposer ajout manuel
-                    Executors.newSingleThreadExecutor().execute(() -> {
-                        if (db.channelDao().count() == 0)
-                            runOnUiThread(() -> showAddPlaylistDialog());
-                    });
+                    // Sauvegarder le succès de la synchronisation pour bloquer pendant 7 jours
+                    getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE)
+                        .edit()
+                        .putLong("last_weekly_sync_timestamp", System.currentTimeMillis())
+                        .apply();
                 }
+                // ⚠️ RETIRÉ : L'appel automatique vers showAddPlaylistDialog() a été supprimé pour éviter l'ouverture du dialogue d'ajout manuel.
             });
         });
     }
