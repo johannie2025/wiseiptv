@@ -15,7 +15,6 @@ public class PlaylistLoader {
 
     public interface Callback { void onDone(int count); void onError(String msg); }
 
-    /** Charge une playlist de manière asynchrone */
     public static void load(PlaylistEntity pl, AppDatabase db, Callback cb) {
         Executors.newSingleThreadExecutor().execute(() -> {
             try {
@@ -36,18 +35,46 @@ public class PlaylistLoader {
         });
     }
 
-    /** Synchrone — à appeler uniquement depuis un thread background */
+    /**
+     * Charge une playlist Xtream.
+     *
+     * Gère deux cas :
+     *  1. URL de BASE serveur  → http://server.com:8080
+     *     On construit : base + /get.php?username=...&password=...&type=m3u_plus&output=ts
+     *
+     *  2. URL COMPLÈTE M3U     → http://server.com/get.php?username=...&password=...&type=m3u_plus
+     *     On utilise l'URL telle quelle sans rien ajouter.
+     *
+     * Exemples :
+     *   "https://tvradiozap.eu/get.php?username=d:tvrztv&password=public&type=m3u_plus"
+     *   → utilisée directement
+     *
+     *   "http://myserver.com:8080"  + username="user" + password="pass"
+     *   → construit "http://myserver.com:8080/get.php?username=user&password=pass&type=m3u_plus&output=ts"
+     */
     public static List<ChannelEntity> loadXtreamSync(PlaylistEntity pl) throws IOException {
-        String base = pl.url.trim();
-        if (!base.endsWith("/")) base += "/";
-        String url = base + "get.php?username=" + pl.username
-                + "&password=" + pl.password + "&type=m3u_plus&output=ts";
-        return parseUrl(url);
+        String url = pl.url.trim();
+        if (isFullXtreamUrl(url)) {
+            // URL complète avec get.php → utiliser directement
+            return parseUrl(url);
+        }
+        // URL de base → construire l'URL M3U
+        String base = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+        String fullUrl = base + "/get.php?username=" + encode(pl.username)
+                + "&password=" + encode(pl.password)
+                + "&type=m3u_plus&output=ts";
+        return parseUrl(fullUrl);
     }
 
-    /** Synchrone — à appeler uniquement depuis un thread background */
+    /**
+     * Charge une playlist M3U depuis une URL directe ou un fichier local.
+     *
+     * Exemples :
+     *   "https://iptv-org.github.io/iptv/languages/eng.m3u"  → téléchargement HTTP
+     *   "file:///sdcard/playlist.m3u"                        → lecture locale
+     */
     public static List<ChannelEntity> loadUrlSync(PlaylistEntity pl) throws IOException {
-        String url = pl.url;
+        String url = pl.url.trim();
         if (url.startsWith("file://") || url.startsWith("/")) {
             InputStream is = new FileInputStream(url.replace("file://", ""));
             List<ChannelEntity> list = M3UParser.parse(is);
@@ -57,13 +84,27 @@ public class PlaylistLoader {
         return parseUrl(url);
     }
 
+    /**
+     * Retourne true si l'URL est déjà une URL M3U Xtream complète.
+     * Critères : contient "get.php" dans le path.
+     */
+    public static boolean isFullXtreamUrl(String url) {
+        return url != null && url.toLowerCase().contains("get.php");
+    }
+
+    private static String encode(String s) {
+        if (s == null) return "";
+        try { return URLEncoder.encode(s, "UTF-8"); }
+        catch (Exception e) { return s; }
+    }
+
     private static List<ChannelEntity> parseUrl(String url) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(15_000);
         c.setReadTimeout(120_000);
         c.setRequestProperty("User-Agent", "WiseIPTV/2.0");
         if (c.getResponseCode() != 200)
-            throw new IOException("HTTP " + c.getResponseCode());
+            throw new IOException("HTTP " + c.getResponseCode() + " → " + url);
         InputStream is = c.getInputStream();
         List<ChannelEntity> list = M3UParser.parse(is);
         is.close();
@@ -85,8 +126,8 @@ public class PlaylistLoader {
                         ? loadXtreamSync(pl) : loadUrlSync(pl);
                     if (list != null && !list.isEmpty()) {
                         for (ChannelEntity ch : list) ch.playlistId = pl.id;
-                        final List<ChannelEntity> fl = list;
-                        final long fid = pl.id;
+                        final List<ChannelEntity> fl  = list;
+                        final long                fid = pl.id;
                         db.runInTransaction(() -> {
                             db.channelDao().deleteByPlaylist(fid);
                             db.channelDao().insertAll(fl);

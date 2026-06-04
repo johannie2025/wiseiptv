@@ -3,7 +3,6 @@ package com.wdesign.wiseiptv.mobile.ui;
 import android.content.*;
 import android.os.*;
 import android.text.TextUtils;
-import android.util.Log;
 import android.view.View;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
@@ -23,8 +22,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 
+/**
+ * MainActivity
+ *
+ * CORRECTIONS :
+ *  1. Observers LiveData — removeObserver() avant chaque nouveau observe()
+ *     → un seul observer actif à la fois → plus d'ANR.
+ *  2. startBackgroundDownload() reçoit les extras d'ActivationActivity
+ *     (login/password/dns_urls) et télécharge APRÈS que l'UI soit visible.
+ *  3. Détection automatique Xtream vs M3U URL :
+ *     - URL contenant "get.php", "/get.php", login+password → TYPE_XTREAM
+ *     - URL finissant par .m3u/.m3u8 ou sans login → TYPE_M3U_URL
+ */
 public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
+    // Extras transmis par ActivationActivity
     public static final String EXTRA_ACT_LOGIN        = "act_login";
     public static final String EXTRA_ACT_PASSWORD     = "act_password";
     public static final String EXTRA_ACT_EXPIRES      = "act_expires";
@@ -44,7 +56,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private int    currentTab   = 0;
     private String currentGroup = null;
 
-    // Un seul observer LiveData actif à la fois (fix crash accumulation)
+    // Un seul observer LiveData actif à la fois
     private LiveData<List<ChannelEntity>> currentLiveData;
     private Observer<List<ChannelEntity>> currentObserver;
     private LiveData<List<String>>        currentGroupLiveData;
@@ -72,14 +84,164 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         setupSearch();
         setupBottomNav();
 
-        // Affiche le cache local immédiatement
+        // Affiche le cache immédiatement
         observeCurrentTab();
 
-        // Téléchargement en arrière-plan (non bloquant)
-        startBackgroundSync();
+        // Télécharge en background
+        startBackgroundDownload();
     }
 
-    // ── Observer unique ──────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // Téléchargement background
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void startBackgroundDownload() {
+        Intent intent   = getIntent();
+        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
+        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
+        String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
+        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
+        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
+
+        // ── Chemin 1 : extras frais depuis ActivationActivity ─────────────
+        if (dnsUrls != null && dnsUrls.length > 0 && login != null && !login.isEmpty()) {
+            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+            final String fLogin    = login;
+            final String fPassword = password != null ? password : "";
+            final String[] fUrls   = dnsUrls;
+            final String[] fEpgs   = dnsEpgUrls != null ? dnsEpgUrls : new String[0];
+
+            Executors.newSingleThreadExecutor().execute(() ->
+                downloadDnsSequentially(fUrls, fEpgs, fLogin, fPassword, 0, 0)
+            );
+            return;
+        }
+
+        // ── Chemin 2 : rotation/retour — refresh stale depuis la BDD ──────
+        PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
+            @Override public void onDone(int count) {
+                if (count > 0) runOnUiThread(() -> observeCurrentTab());
+            }
+            @Override public void onError(String msg) {}
+        });
+    }
+
+    /**
+     * Télécharge chaque DNS séquentiellement en arrière-plan.
+     * Détecte automatiquement le type : Xtream (login/password) ou M3U URL directe.
+     *
+     * Exemples gérés :
+     *   Xtream base : http://server.com:8080  + login + password → /get.php?username=...
+     *   Xtream full : http://server.com/get.php?username=d:user&password=xxx&type=m3u_plus
+     *   M3U URL     : https://iptv-org.github.io/iptv/languages/eng.m3u
+     */
+    private void downloadDnsSequentially(String[] urls, String[] epgs,
+                                          String login, String password,
+                                          int index, int totalAccumulated) {
+        if (index >= urls.length) {
+            // Tous les DNS traités
+            final int total = totalAccumulated;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (progressBar != null) progressBar.setVisibility(View.GONE);
+                if (total > 0) {
+                    observeCurrentTab();
+                    Toast.makeText(this, "✅ " + total + " chaînes chargées",
+                        Toast.LENGTH_SHORT).show();
+                }
+            });
+            return;
+        }
+
+        String rawUrl = urls[index].trim();
+        if (rawUrl.isEmpty()) {
+            downloadDnsSequentially(urls, epgs, login, password, index + 1, totalAccumulated);
+            return;
+        }
+
+        // ── Détection du type ─────────────────────────────────────────────
+        int playlistType = detectPlaylistType(rawUrl, login);
+
+        // ── Créer ou mettre à jour la PlaylistEntity ──────────────────────
+        PlaylistEntity pl = db.playlistDao().findByUrlAndLogin(rawUrl, login);
+        if (pl == null) pl = new PlaylistEntity();
+        pl.name        = urls.length == 1 ? "Abonnement IPTV" : "IPTV #" + (index + 1);
+        pl.type        = playlistType;
+        pl.isActive    = true;
+        pl.lastUpdated = 0; // forcer refresh
+
+        if (playlistType == PlaylistEntity.TYPE_XTREAM && !isFullM3uUrl(rawUrl)) {
+            // URL de base Xtream : http://server.com:8080 → PlaylistLoader construira /get.php
+            pl.url      = rawUrl;
+            pl.username = login;
+            pl.password = password;
+        } else {
+            // URL complète (get.php déjà inclus) ou M3U directe
+            pl.url      = rawUrl;
+            pl.username = login;
+            pl.password = password;
+        }
+
+        if (pl.id == 0) {
+            pl.id = db.playlistDao().insert(pl);
+        } else {
+            db.playlistDao().update(pl);
+        }
+
+        final PlaylistEntity fPl    = pl;
+        final int            fIndex = index;
+
+        PlaylistLoader.load(fPl, db, new PlaylistLoader.Callback() {
+            @Override public void onDone(int count) {
+                downloadDnsSequentially(urls, epgs, login, password,
+                    fIndex + 1, totalAccumulated + count);
+            }
+            @Override public void onError(String msg) {
+                // Erreur sur ce DNS → passer au suivant sans bloquer
+                downloadDnsSequentially(urls, epgs, login, password,
+                    fIndex + 1, totalAccumulated);
+            }
+        });
+    }
+
+    /**
+     * Détecte le type de playlist depuis l'URL et les credentials.
+     *
+     * Règles :
+     *  → TYPE_XTREAM si :
+     *    - L'URL contient "get.php" (URL M3U Xtream complète)
+     *    - OU l'URL est une base serveur ET login non vide (Xtream credentials)
+     *  → TYPE_M3U_URL sinon (URL M3U directe, pas de login nécessaire)
+     */
+    private int detectPlaylistType(String url, String login) {
+        String lower = url.toLowerCase();
+        // URL M3U directe évidente
+        if (lower.endsWith(".m3u") || lower.endsWith(".m3u8")) {
+            return PlaylistEntity.TYPE_M3U_URL;
+        }
+        // URL Xtream complète avec get.php
+        if (lower.contains("get.php")) {
+            return PlaylistEntity.TYPE_XTREAM;
+        }
+        // Base serveur Xtream + credentials fournis
+        if (login != null && !login.isEmpty()) {
+            return PlaylistEntity.TYPE_XTREAM;
+        }
+        // Par défaut : M3U URL
+        return PlaylistEntity.TYPE_M3U_URL;
+    }
+
+    /**
+     * Retourne true si l'URL est une URL M3U Xtream complète (avec get.php).
+     * Dans ce cas PlaylistLoader.loadXtreamSync ne doit PAS reconstruire l'URL.
+     */
+    private boolean isFullM3uUrl(String url) {
+        return url.toLowerCase().contains("get.php");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Observers LiveData — un seul actif à la fois
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void observeChannels(LiveData<List<ChannelEntity>> liveData) {
         if (currentLiveData != null && currentObserver != null)
@@ -126,211 +288,9 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
-  
-
-// ── Téléchargement Arrière-plan géré par MainActivity (Style Android TV) ──
-
-// ─────────────────────────────────────────────────────────────────────────
-    // SYNC BACKGROUND — Même logique que TvMainActivity (processNextDns)
-    //
-    // 3 chemins (exactement comme TV) :
-    //   1. Extras depuis ActivationActivity (login + dnsUrls frais)
-    //   2. SharedPreferences "wise_activation" (reboot / rotation)
-    //   3. Playlists manuelles stale
-    //
-    // Chaque DNS → findOrCreatePlaylist() → PlaylistLoader.load() séquentiel.
-    // L'UI affiche les chaînes dès qu'elles arrivent via observeCurrentTab().
     // ─────────────────────────────────────────────────────────────────────────
-    private void startBackgroundSync() {
-        Intent intent = getIntent();
-        if (intent == null) { tryStaleRefresh(); return; }
-
-        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
-        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
-        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
-        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
-
-        // Chemin 1 : extras frais depuis ActivationActivity
-        if (login != null && dnsUrls != null && dnsUrls.length > 0) {
-            Log.d("MainActivity", "Sync ch1: extras DNS=" + dnsUrls.length);
-            processNextDns(0, dnsUrls, login,
-                password != null ? password : "",
-                dnsEpgUrls != null ? dnsEpgUrls : new String[0], 0);
-            return;
-        }
-
-        // Chemin 2 : prefs sauvegardées par ActivationActivity
-        SharedPreferences prefs = getSharedPreferences("wise_activation", Context.MODE_PRIVATE);
-        String savedStatus = prefs.getString("status", "UNKNOWN");
-        String savedLogin  = prefs.getString("login",  null);
-        String savedPass   = prefs.getString("password", "");
-        String savedDnsRaw = prefs.getString("dns_urls", "");
-
-        if ("ACTIVE".equals(savedStatus) && savedLogin != null && !savedDnsRaw.isEmpty()) {
-            Log.d("MainActivity", "Sync ch2: prefs dns=" + savedDnsRaw);
-            String[] urls = savedDnsRaw.split(",");
-            String[] epgs = prefs.getString("dns_epg_urls", "").split(",");
-            processNextDns(0, urls, savedLogin, savedPass, epgs, 0);
-            return;
-        }
-
-        // Chemin 3 : playlists manuelles stale
-        Log.d("MainActivity", "Sync ch3: stale");
-        tryStaleRefresh();
-    }
-
-    /**
-     * Traitement séquentiel des DNS — identique à TvMainActivity.processNextDns().
-     * Chaque DNS → PlaylistLoader.load() (auto-détecte Xtream ou M3U URL).
-     * Passe au suivant qu'il y ait succès ou erreur.
-     */
-    private void processNextDns(int index, String[] dnsUrls, String login,
-                            String password, String[] epgUrls,
-                            int accumulated) {
-    // 1. Guard de sécurité sur l'état de l'Activity
-    if (isFinishing() || isDestroyed()) return;
-
-    // Condition de sortie : Tous les DNS ont été passés au crible
-    if (index >= dnsUrls.length) {
-        runOnUiThread(() -> {
-            if (isFinishing() || isDestroyed()) return;
-            
-            showSyncBanner(false, null);
-            observeCurrentTab();
-            
-            if (accumulated > 0) {
-                Toast.makeText(this, "✅ " + accumulated + " chaînes chargées",
-                    Toast.LENGTH_SHORT).show();
-            } else {
-                // Remplacer le "newSingleThreadExecutor" sauvage par un thread à la volée 
-                // ou un exécuteur global pour éviter le spam de pools de threads
-                new Thread(() -> {
-                    // S'assurer que l'activité tient toujours debout avant la requête DB
-                    if (isFinishing() || isDestroyed()) return;
-                    
-                    if (db.channelDao().count() == 0) {
-                        runOnUiThread(() -> {
-                            // Guard CRITIQUE avant d'afficher un Dialog de l'UI
-                            if (!isFinishing() && !isDestroyed()) {
-                                showAddPlaylistDialog();
-                            }
-                        });
-                    }
-                }).start();
-            }
-            
-            // Sauvegarder le timestamp de synchronisation réussie
-            getSharedPreferences("wise_activation", Context.MODE_PRIVATE)
-                .edit().putLong("last_sync_ts", System.currentTimeMillis()).apply();
-        });
-        return;
-    }
-
-    // Nettoyage et validation de l'URL courante
-    String url = dnsUrls[index] != null ? dnsUrls[index].trim() : "";
-    if (url.isEmpty()) {
-        processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated);
-        return;
-    }
-
-    final int idx = index + 1;
-    final int total = dnsUrls.length;
-    runOnUiThread(() -> {
-        if (!isFinishing() && !isDestroyed()) {
-            showSyncBanner(true, "📥 Serveur " + idx + "/" + total + "…");
-        }
-    });
-
-    // Sécurisation de l'accès EPG correspondant pour éviter les IndexOutOfBoundsException
-    final String currentEpg = (epgUrls != null && index < epgUrls.length && epgUrls[index] != null) 
-            ? epgUrls[index].trim() : "";
-
-    // Traitement asynchrone sur un thread léger dédié à l'itération courante
-    new Thread(() -> {
-        if (isFinishing() || isDestroyed()) return;
-
-        // Étape 1 : Room findOrCreatePlaylist
-        PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
-        
-        // Optionnel : Si besoin d'injecter l'EPG spécifique nettoyé au-dessus dans l'entité
-        // pl.epgUrl = currentEpg; 
-
-        // Étape 2 : Chargement réseau et parsing via PlaylistLoader
-        PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
-            @Override 
-            public void onDone(int count) {
-                Log.d("MainActivity", "DNS " + idx + " OK: " + count + " ch");
-                processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated + count);
-            }
-
-            @Override 
-            public void onError(String msg) {
-                Log.w("MainActivity", "DNS " + idx + " err: " + msg);
-                processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated);
-            }
-        });
-    }).start();
-}
-
-    /** Retrouve ou crée la PlaylistEntity pour un DNS donné (auto-détect Xtream/M3U). */
-    private PlaylistEntity findOrCreatePlaylist(String login, String password,
-                                                 String dnsUrl, int idx) {
-        // Chercher par URL + login existant en DB
-        PlaylistEntity existing = db.playlistDao().findByUrlAndLogin(dnsUrl, login);
-        if (existing != null) {
-            existing.password = password;
-            existing.isActive = true;
-            db.playlistDao().update(existing);
-            return existing;
-        }
-
-        PlaylistEntity pl = new PlaylistEntity();
-        // Auto-détection : Xtream si pas d'extension .m3u/.m3u8, sinon URL M3U
-        String urlLower = dnsUrl.toLowerCase();
-        if (urlLower.endsWith(".m3u") || urlLower.endsWith(".m3u8")
-                || urlLower.contains("m3u") && !urlLower.contains("get.php")
-                   && !urlLower.contains("username=")) {
-            pl.type = PlaylistEntity.TYPE_M3U_URL;
-            pl.name = "M3U #" + idx;
-        } else {
-            pl.type = PlaylistEntity.TYPE_XTREAM;
-            pl.name = "IPTV #" + idx;
-        }
-
-        pl.url      = dnsUrl;
-        pl.username = login;
-        pl.password = password;
-        pl.isActive = true;
-        pl.lastUpdated = 0;
-        pl.id = db.playlistDao().insert(pl);
-        return pl;
-    }
-
-    private void tryStaleRefresh() {
-        PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
-            @Override public void onDone(int c) {
-                if (c > 0 && !isFinishing() && !isDestroyed())
-                    runOnUiThread(() -> observeCurrentTab());
-            }
-            @Override public void onError(String msg) {
-                Log.w("MainActivity", "Stale refresh: " + msg);
-            }
-        });
-    }
-
-    /** Bandeau de statut discret pendant le chargement (non bloquant). */
-    private void showSyncBanner(boolean show, String msg) {
-        if (tvEmpty == null) return;
-        if (show) {
-            tvEmpty.setText(msg);
-            tvEmpty.setVisibility(View.VISIBLE);
-            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
-        } else {
-            tvEmpty.setVisibility(View.GONE);
-            if (progressBar != null) progressBar.setVisibility(View.GONE);
-        }
-    }
-    // ── Tabs / Search / BottomNav / Spinner ──────────────────────────────────
+    // UI setup
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void setupTabs() {
         String[] tabs = {"Tout", "Live", "Films", "Séries", "Favoris"};
@@ -352,7 +312,8 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         ArrayList<String> items = new ArrayList<>();
         items.add("Tous les groupes");
         items.addAll(groups);
-        ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, items);
+        ArrayAdapter<String> a = new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_item, items);
         a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinnerGroup.setAdapter(a);
         spinnerGroup.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -382,23 +343,27 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             int id = item.getItemId();
             if      (id == R.id.nav_home)     { observeCurrentTab(); return true; }
             else if (id == R.id.nav_add)      { showAddPlaylistDialog(); return true; }
-            else if (id == R.id.nav_settings) { startActivity(new Intent(this, SettingsActivity.class)); return true; }
+            else if (id == R.id.nav_settings) {
+                startActivity(new Intent(this, SettingsActivity.class)); return true;
+            }
             return false;
         });
     }
 
-    // ── Ajout manuel de playlist ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // Ajout manuel
+    // ─────────────────────────────────────────────────────────────────────────
 
     public void showAddPlaylistDialog() {
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
         b.setTitle("Ajouter une playlist");
         android.view.View v = getLayoutInflater().inflate(R.layout.dialog_add_playlist, null);
-        EditText etName   = v.findViewById(R.id.et_playlist_name);
-        EditText etUrl    = v.findViewById(R.id.et_playlist_url);
-        EditText etServer = v.findViewById(R.id.et_xtream_server);
-        EditText etUser   = v.findViewById(R.id.et_xtream_user);
-        EditText etPass   = v.findViewById(R.id.et_xtream_pass);
-        RadioGroup rgType = v.findViewById(R.id.rg_type);
+        EditText   etName   = v.findViewById(R.id.et_playlist_name);
+        EditText   etUrl    = v.findViewById(R.id.et_playlist_url);
+        EditText   etServer = v.findViewById(R.id.et_xtream_server);
+        EditText   etUser   = v.findViewById(R.id.et_xtream_user);
+        EditText   etPass   = v.findViewById(R.id.et_xtream_pass);
+        RadioGroup rgType   = v.findViewById(R.id.rg_type);
         android.view.View layoutXtream = v.findViewById(R.id.layout_xtream);
 
         rgType.setOnCheckedChangeListener((g, checked) -> {
@@ -438,13 +403,15 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                         runOnUiThread(() -> {
                             if (progressBar != null) progressBar.setVisibility(View.GONE);
                             observeCurrentTab();
-                            Toast.makeText(MainActivity.this, count + " chaînes chargées", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this,
+                                count + " chaînes chargées", Toast.LENGTH_SHORT).show();
                         });
                     }
                     @Override public void onError(String msg) {
                         runOnUiThread(() -> {
                             if (progressBar != null) progressBar.setVisibility(View.GONE);
-                            Toast.makeText(MainActivity.this, "Erreur : " + msg, Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this,
+                                "Erreur : " + msg, Toast.LENGTH_LONG).show();
                         });
                     }
                 });
