@@ -91,7 +91,7 @@ public class ActivationManager {
      * une PlaylistEntity de type XTREAM et la télécharge immédiatement.
      * Appelé depuis ActivationActivity.downloadAndGo() avec feedback UI.
      */
-    public static void upsertAndDownloadAll(Context ctx, AppDatabase db,
+public static void upsertAndDownloadAll(Context ctx, AppDatabase db,
                                              DeviceSecurity.ActivationResult r,
                                              DownloadCallback cb) {
         Executors.newSingleThreadExecutor().execute(() -> {
@@ -102,11 +102,14 @@ public class ActivationManager {
             List<Long> existingIds = parseLongs(savedIds);
 
             List<Long> newIds    = new ArrayList<>();
-            int        total     = 0;
-            String     lastError = null;
-            int        dnsCount  = r.dnsServers.size();
+            int        dnsCount  = r.dnsServers != null ? r.dnsServers.size() : 0;
 
-       // Boucle de création / mise à jour en BDD uniquement (Pas de téléchargement ici !)
+            if (dnsCount == 0) {
+                cb.onError("Aucun serveur de flux reçu");
+                return;
+            }
+
+            // Boucle de création / mise à jour en BDD uniquement
             for (int i = 0; i < dnsCount; i++) {
                 DeviceSecurity.DnsEntry dns = r.dnsServers.get(i);
                 if (dns.url == null || dns.url.isEmpty()) continue;
@@ -116,7 +119,7 @@ public class ActivationManager {
                 PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
                 if (pl == null) pl = new PlaylistEntity();
 
-                // ── DÉTECTION AUTOMATIQUE (Identique à la version TV) ──
+                // DÉTECTION AUTOMATIQUE
                 String urlBasse = dns.url.toLowerCase().trim();
                 if (urlBasse.endsWith(".m3u") || urlBasse.endsWith(".m3u8") || urlBasse.contains("m3u")) {
                     pl.type = PlaylistEntity.TYPE_M3U_URL;
@@ -126,11 +129,11 @@ public class ActivationManager {
                     pl.name = dnsCount == 1 ? "Abonnement IPTV" : "IPTV #" + (i + 1);
                 }
 
-                pl.url        = dns.url;
-                pl.username   = r.login;
-                pl.password   = r.password;
-                pl.isActive   = true;
-                pl.lastUpdated = 0; // Marquer à 0 pour forcer MainActivity à s'en occuper
+                pl.url         = dns.url;
+                pl.username    = r.login;
+                pl.password    = r.password;
+                pl.isActive    = true;
+                pl.lastUpdated = 0; // Force MainActivity à s'occuper du téléchargement
 
                 if (pl.id == 0) {
                     pl.id = db.playlistDao().insert(pl);
@@ -139,12 +142,11 @@ public class ActivationManager {
                 }
                 newIds.add(pl.id);
 
-                // Notification légère de création
                 final String pName = pl.name;
                 cb.onProgress(pName);
             }
 
-            // Supprimer les anciennes playlists qui ne sont plus dans le nouveau set
+            // Supprimer les anciennes playlists obsolètes
             for (long oldId : existingIds) {
                 if (!newIds.contains(oldId)) {
                     db.channelDao().deleteByPlaylist(oldId);
@@ -156,9 +158,9 @@ public class ActivationManager {
             // Sauvegarder les nouveaux IDs
             prefs.edit().putString("playlist_ids", joinLongs(newIds)).apply();
 
-            if (total > 0) cb.onDone(total);
-            else if (lastError != null) cb.onError(lastError);
-            else cb.onError("Aucune chaîne reçue");
+            // CORRECTION ICI : On valide le succès (onDone) avec le nombre de serveurs configurés 
+            // au lieu de renvoyer une erreur bloquante !
+            cb.onDone(newIds.size()); 
         });
     }
 
