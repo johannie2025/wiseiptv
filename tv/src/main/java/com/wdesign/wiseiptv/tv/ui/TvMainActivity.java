@@ -68,7 +68,21 @@ public class TvMainActivity extends FragmentActivity {
         observeAllRows();
         startBackgroundSync();
 		btnSearch.post(btnSearch::requestFocus);
+		
     }
+
+@Override
+protected void onResume() {
+    super.onResume();
+    
+    // Force le focus sur le bouton de recherche à CHAQUE FOIS que l'écran redevient visible
+    if (btnSearch != null) {
+        btnSearch.post(() -> {
+            btnSearch.requestFocus();
+            Log.d(TAG, "Focus forcé sur btnSearch dans onResume");
+        });
+    }
+}
 
 // ── BrowseFragment — Version Nettoyée et Sans Loupe Native ─────────────────
     private void setupBrowseFragment() {
@@ -383,8 +397,65 @@ private void loadDnsSequentially(String login, String password, String expires,
     showSyncStatus("Chargement de vos chaînes…");
     
     Executors.newSingleThreadExecutor().execute(() -> {
-        // On traite les serveurs un par un à l'aide d'un itérateur récursif simple
-        processNextDns(0, dnsUrls, login, password);
+        // On commence à l'index 0 avec un compteur de chaînes à 0
+        processNextDns(0, dnsUrls, login, password, 0);
+    });
+}
+
+private void processNextDns(int index, String[] dnsUrls, String login, String password, final int totalLoadedAccumulated) {
+    if (index >= dnsUrls.length) {
+        // ── TOUS LES DNS SONT CHARGÉS ──
+        runOnUiThread(() -> {
+            hideSyncStatus();
+            
+            if (totalLoadedAccumulated > 0) {
+                Toast.makeText(this, "✅ Synchronisation terminée : " + totalLoadedAccumulated + " chaînes chargées", Toast.LENGTH_LONG).show();
+                
+                // FORCE LE RAFRAÎCHISSEMENT VISUEL : Ré-observe ou recharge les lignes
+                observeAllRows(); 
+            } else {
+                Toast.makeText(this, "⚠️ Synchronisation terminée, mais aucune chaîne trouvée.", Toast.LENGTH_LONG).show();
+            }
+            
+            // Verrouiller la mise à jour hebdomadaire pendant 7 jours
+            getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_weekly_sync_timestamp", System.currentTimeMillis())
+                .apply();
+        });
+        return;
+    }
+
+    String url = dnsUrls[index].trim();
+    if (url.isEmpty()) {
+        processNextDns(index + 1, dnsUrls, login, password, totalLoadedAccumulated);
+        return;
+    }
+
+    int idx = index + 1;
+    int total = dnsUrls.length;
+
+    // Récupérer ou créer l'entité playlist dans la DB
+    PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+
+    runOnUiThread(() -> showSyncStatus("📥 Téléchargement du serveur " + idx + "/" + total + "…"));
+
+    // Utilisation du chargeur robuste (identique au mode manuel)
+    PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
+        @Override
+        public void onDone(int count) {
+            Log.d(TAG, "DNS " + idx + " chargé : " + count + " chaînes.");
+            
+            // On passe au DNS suivant en ajoutant les chaînes trouvées au compteur global
+            processNextDns(index + 1, dnsUrls, login, password, totalLoadedAccumulated + count);
+        }
+
+        @Override
+        public void onError(String msg) {
+            Log.w(TAG, "Échec du DNS " + idx + " : " + msg);
+            // En cas d'erreur sur un serveur, on passe quand même au suivant sans perdre le compte
+            processNextDns(index + 1, dnsUrls, login, password, totalLoadedAccumulated);
+        }
     });
 }
 
