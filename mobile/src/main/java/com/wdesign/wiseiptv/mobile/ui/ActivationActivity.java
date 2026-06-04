@@ -90,25 +90,24 @@ public class ActivationActivity extends AppCompatActivity {
         // Accès : vérifie + télécharge + ouvre MainActivity
         btnAccess.setOnClickListener(v -> {
             String saved = getPrefs().getString("status", "");
-            if ("ACTIVE".equals(saved) && !isCheckInProgress) {
-                // On a déjà un résultat actif → télécharger directement
+            if (tvStatus.getText().toString().equals("📡 HORS LIGNE")) {
+                goToMain(); // Navigation directe si le mode offline est explicitement affiché
+            } else if ("ACTIVE".equals(saved) && !isCheckInProgress) {
                 startDownloadAndGo();
             } else if (!isCheckInProgress) {
-                // Pas encore vérifié → vérifier d'abord puis télécharger
                 checkActivation(true);
             }
         });
 
         // Afficher état expiré/désactivé s'il est en cache
-        String saved = getPrefs().getString("status", "");
-        if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) {
-            showInactive(saved);
+        String savedStatus = getPrefs().getString("status", "");
+        if ("EXPIRED".equals(savedStatus) || "DISABLED".equals(savedStatus)) {
+            showInactive(savedStatus);
         }
 
-        // Vérification réseau silencieuse au démarrage (affichage seulement, pas de DL)
         checkActivation(false);
     }
-
+	
     // ── Vérification ───────────────────────────────────────────────
 
     private void checkActivation(boolean goOnSuccess) {
@@ -254,8 +253,7 @@ public class ActivationActivity extends AppCompatActivity {
         btnAccess.setVisibility(View.VISIBLE);
         btnAccess.setEnabled(true);
         btnAccess.setText("▶ Continuer hors ligne");
-        // En mode offline : aller directement sans télécharger
-        btnAccess.setOnClickListener(v -> goToMain());
+        // NOTE: Le comportement du clic est maintenant sécurisé centralement dans le bouton principal au dessus
     }
 
     // ── Cache ───────────────────────────────────────────────────────
@@ -271,7 +269,7 @@ public class ActivationActivity extends AppCompatActivity {
         } catch (Exception e) { return false; }
     }
 
-   private void saveCache(DeviceSecurity.ActivationResult r) {
+    private void saveCache(DeviceSecurity.ActivationResult r) {
         if (r == null) return;
         
         SharedPreferences.Editor ed = getPrefs().edit()
@@ -280,22 +278,14 @@ public class ActivationActivity extends AppCompatActivity {
             .putString("login",      r.login != null ? r.login : "")
             .putString("password",   r.password != null ? r.password : "");
 
-        // Sauvegarder les DNS sérialisés sous forme de CSV (Comma-Separated Values)
-        // Permet à MainActivity.startBackgroundSync() (Chemin 2) de reconstruire 
-        // la file d'attente réseau après un reboot, un crash ou une rotation d'écran.
         if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
             StringBuilder urls = new StringBuilder();
             StringBuilder epgs = new StringBuilder();
             for (int i = 0; i < r.dnsServers.size(); i++) {
-                DeviceSecurity.DnsEntry entry = r.dnsServers.get(i);
-                if (entry == null || entry.url == null) continue;
-                
-                if (urls.length() > 0) { 
-                    urls.append(","); 
-                    epgs.append(","); 
-                }
-                urls.append(entry.url.trim());
-                epgs.append(entry.epgUrl != null ? entry.epgUrl.trim() : "");
+                if (i > 0) { urls.append(","); epgs.append(","); }
+                urls.append(r.dnsServers.get(i).url);
+                String epg = r.dnsServers.get(i).epgUrl;
+                epgs.append(epg != null ? epg : "");
             }
             ed.putString("dns_urls",     urls.toString())
               .putString("dns_epg_urls", epgs.toString());
@@ -311,14 +301,26 @@ public class ActivationActivity extends AppCompatActivity {
             .remove("password")
             .remove("dns_urls")
             .remove("dns_epg_urls")
-            .remove("last_sync_ts")
             .apply();
     }
-	
+
     private SharedPreferences getPrefs() {
         return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    private void goToMain() {
+        if (isFinishing() || isDestroyed()) return;
+        startActivity(new Intent(this, MainActivity.class));
+        finish();
+    }
+
+    private void setLoading(boolean on) {
+        if (progressBar == null || btnCheck == null) return;
+        progressBar.setVisibility(on ? View.VISIBLE : View.GONE);
+        btnCheck.setEnabled(!on);
+        btnCheck.setText(on ? "Vérification…" : "🔄 Vérifier l'activation");
+    }
+}
     // ── Navigation ──────────────────────────────────────────────────
 
     private void goToMain() {

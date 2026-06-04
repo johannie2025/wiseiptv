@@ -185,61 +185,92 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
      * Passe au suivant qu'il y ait succès ou erreur.
      */
     private void processNextDns(int index, String[] dnsUrls, String login,
-                                 String password, String[] epgUrls,
-                                 int accumulated) {
-        if (index >= dnsUrls.length) {
-            // Tous les DNS traités
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                showSyncBanner(false, null);
-                observeCurrentTab();
-                if (accumulated > 0)
-                    Toast.makeText(this, "✅ " + accumulated + " chaînes chargées",
-                        Toast.LENGTH_SHORT).show();
-                else {
-                    // Aucune chaîne → proposer ajout manuel si DB vide
-                    Executors.newSingleThreadExecutor().execute(() -> {
-                        if (db.channelDao().count() == 0)
-                            runOnUiThread(this::showAddPlaylistDialog);
-                    });
-                }
-                // Sauvegarder timestamp pour éviter re-sync inutile
-                getSharedPreferences("wise_activation", Context.MODE_PRIVATE)
-                    .edit().putLong("last_sync_ts", System.currentTimeMillis()).apply();
-            });
-            return;
-        }
+                            String password, String[] epgUrls,
+                            int accumulated) {
+    // 1. Guard de sécurité sur l'état de l'Activity
+    if (isFinishing() || isDestroyed()) return;
 
-        String url = dnsUrls[index].trim();
-        if (url.isEmpty()) {
-            processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated);
-            return;
-        }
-
-        final int idx   = index + 1;
-        final int total = dnsUrls.length;
-        runOnUiThread(() -> showSyncBanner(true, "📥 Serveur " + idx + "/" + total + "…"));
-
-        // findOrCreatePlaylist accède à Room, on l'exécute sur un thread secondaire
-        Executors.newSingleThreadExecutor().execute(() -> {
-            PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+    // Condition de sortie : Tous les DNS ont été passés au crible
+    if (index >= dnsUrls.length) {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
             
-            // Lancement du chargement de la playlist (PlaylistLoader gère son propre thread)
-            PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
-                @Override 
-                public void onDone(int count) {
-                    Log.d("MainActivity", "DNS " + idx + " OK: " + count + " ch");
-                    processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated + count);
-                }
-
-                @Override 
-                public void onError(String msg) {
-                    Log.w("MainActivity", "DNS " + idx + " err: " + msg);
-                    processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated);
-                }
-            });
+            showSyncBanner(false, null);
+            observeCurrentTab();
+            
+            if (accumulated > 0) {
+                Toast.makeText(this, "✅ " + accumulated + " chaînes chargées",
+                    Toast.LENGTH_SHORT).show();
+            } else {
+                // Remplacer le "newSingleThreadExecutor" sauvage par un thread à la volée 
+                // ou un exécuteur global pour éviter le spam de pools de threads
+                new Thread(() -> {
+                    // S'assurer que l'activité tient toujours debout avant la requête DB
+                    if (isFinishing() || isDestroyed()) return;
+                    
+                    if (db.channelDao().count() == 0) {
+                        runOnUiThread(() -> {
+                            // Guard CRITIQUE avant d'afficher un Dialog de l'UI
+                            if (!isFinishing() && !isDestroyed()) {
+                                showAddPlaylistDialog();
+                            }
+                        });
+                    }
+                }).start();
+            }
+            
+            // Sauvegarder le timestamp de synchronisation réussie
+            getSharedPreferences("wise_activation", Context.MODE_PRIVATE)
+                .edit().putLong("last_sync_ts", System.currentTimeMillis()).apply();
         });
+        return;
     }
+
+    // Nettoyage et validation de l'URL courante
+    String url = dnsUrls[index] != null ? dnsUrls[index].trim() : "";
+    if (url.isEmpty()) {
+        processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated);
+        return;
+    }
+
+    final int idx = index + 1;
+    final int total = dnsUrls.length;
+    runOnUiThread(() -> {
+        if (!isFinishing() && !isDestroyed()) {
+            showSyncBanner(true, "📥 Serveur " + idx + "/" + total + "…");
+        }
+    });
+
+    // Sécurisation de l'accès EPG correspondant pour éviter les IndexOutOfBoundsException
+    final String currentEpg = (epgUrls != null && index < epgUrls.length && epgUrls[index] != null) 
+            ? epgUrls[index].trim() : "";
+
+    // Traitement asynchrone sur un thread léger dédié à l'itération courante
+    new Thread(() -> {
+        if (isFinishing() || isDestroyed()) return;
+
+        // Étape 1 : Room findOrCreatePlaylist
+        PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+        
+        // Optionnel : Si besoin d'injecter l'EPG spécifique nettoyé au-dessus dans l'entité
+        // pl.epgUrl = currentEpg; 
+
+        // Étape 2 : Chargement réseau et parsing via PlaylistLoader
+        PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
+            @Override 
+            public void onDone(int count) {
+                Log.d("MainActivity", "DNS " + idx + " OK: " + count + " ch");
+                processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated + count);
+            }
+
+            @Override 
+            public void onError(String msg) {
+                Log.w("MainActivity", "DNS " + idx + " err: " + msg);
+                processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated);
+            }
+        });
+    }).start();
+}
 
     /** Retrouve ou crée la PlaylistEntity pour un DNS donné (auto-détect Xtream/M3U). */
     private PlaylistEntity findOrCreatePlaylist(String login, String password,
