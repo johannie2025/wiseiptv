@@ -67,6 +67,7 @@ public class TvMainActivity extends FragmentActivity {
         setupBrowseFragment();
         observeAllRows();
         startBackgroundSync();
+		btnSearch.post(btnSearch::requestFocus);
     }
 
 // ── BrowseFragment — Version Nettoyée et Sans Loupe Native ─────────────────
@@ -377,54 +378,63 @@ public class TvMainActivity extends FragmentActivity {
      * (via LiveData observers dans observeAllRows).
      */
 // ── Chargement séquentiel corrigé ─────────────────────────────────────────
-    private void loadDnsSequentially(String login, String password, String expires,
-                                      String[] dnsUrls, String[] epgUrls) {
-        showSyncStatus("Chargement…");
-        Executors.newSingleThreadExecutor().execute(() -> {
-            int totalLoaded = 0;
-            for (int i = 0; i < dnsUrls.length; i++) {
-                String url = dnsUrls[i].trim();
-                if (url.isEmpty()) continue;
-                
-                final int idx = i + 1;
-                final int total = dnsUrls.length;
-                PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+private void loadDnsSequentially(String login, String password, String expires,
+                                  String[] dnsUrls, String[] epgUrls) {
+    showSyncStatus("Chargement de vos chaînes…");
+    
+    Executors.newSingleThreadExecutor().execute(() -> {
+        // On traite les serveurs un par un à l'aide d'un itérateur récursif simple
+        processNextDns(0, dnsUrls, login, password);
+    });
+}
 
-                runOnUiThread(() -> showSyncStatus("📥 DNS " + idx + "/" + total + " — " + pl.name));
-
-                try {
-                    List<ChannelEntity> channels = PlaylistLoader.loadXtreamSync(pl);
-                    if (channels != null && !channels.isEmpty()) {
-                        for (ChannelEntity ch : channels) ch.playlistId = pl.id;
-                        final List<ChannelEntity> fc = channels;
-                        final long fid = pl.id;
-                        db.runInTransaction(() -> {
-                            db.channelDao().deleteByPlaylist(fid);
-                            db.channelDao().insertAll(fc);
-                        });
-                        db.playlistDao().updateTimestamp(pl.id, System.currentTimeMillis());
-                        totalLoaded += channels.size();
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "Erreur DNS " + idx + ": " + e.getMessage());
-                }
-            }
-
-            final int ft = totalLoaded;
-            runOnUiThread(() -> {
-                hideSyncStatus();
-                if (ft > 0) {
-                    Toast.makeText(this, "✅ " + ft + " chaînes chargées", Toast.LENGTH_SHORT).show();
-                    // Sauvegarder le succès de la synchronisation pour bloquer pendant 7 jours
-                    getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE)
-                        .edit()
-                        .putLong("last_weekly_sync_timestamp", System.currentTimeMillis())
-                        .apply();
-                }
-                // ⚠️ RETIRÉ : L'appel automatique vers showAddPlaylistDialog() a été supprimé pour éviter l'ouverture du dialogue d'ajout manuel.
-            });
+private void processNextDns(int index, String[] dnsUrls, String login, String password) {
+    if (index >= dnsUrls.length) {
+        // Synchronisation de tous les DNS terminée !
+        runOnUiThread(() -> {
+            hideSyncStatus();
+            Toast.makeText(this, "✅ Synchronisation automatique terminée", Toast.LENGTH_SHORT).show();
+            
+            // Verrouiller la mise à jour hebdo pendant 7 jours
+            getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE)
+                .edit()
+                .putLong("last_weekly_sync_timestamp", System.currentTimeMillis())
+                .apply();
         });
+        return;
     }
+
+    String url = dnsUrls[index].trim();
+    if (url.isEmpty()) {
+        processNextDns(index + 1, dnsUrls, login, password);
+        return;
+    }
+
+    int idx = index + 1;
+    int total = dnsUrls.length;
+
+    // Récupérer ou créer l'entité
+    PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+
+    runOnUiThread(() -> showSyncStatus("📥 Chargement du serveur " + idx + "/" + total));
+
+    // Utilisation de la méthode native "PlaylistLoader.load" identique à celle du mode manuel
+    PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
+        @Override
+        public void onDone(int count) {
+            Log.d(TAG, "DNS " + idx + " chargé avec succès : " + count + " chaînes.");
+            // DNS suivant
+            processNextDns(index + 1, dnsUrls, login, password);
+        }
+
+        @Override
+        public void onError(String msg) {
+            Log.w(TAG, "Échec du chargement automatique du DNS " + idx + " : " + msg);
+            // On passe quand même au suivant en cas d'erreur
+            processNextDns(index + 1, dnsUrls, login, password);
+        }
+    });
+}
 
     /** Retrouve ou crée la PlaylistEntity pour un DNS donné */
     private PlaylistEntity findOrCreatePlaylist(String login, String password,
