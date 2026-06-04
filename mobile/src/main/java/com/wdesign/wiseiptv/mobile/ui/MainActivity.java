@@ -48,7 +48,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private RecyclerView         rvChannels;
     private ChannelAdapter       adapter;
     private ProgressBar          progressBar;
-    private TextView             tvEmpty, tvSyncStatus;
+    private TextView             tvEmpty;
     private TabLayout            tabLayout;
     private BottomNavigationView bottomNav;
     private SearchView           searchView;
@@ -72,7 +72,6 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         rvChannels   = findViewById(R.id.rv_channels);
         progressBar  = findViewById(R.id.progress_bar);
         tvEmpty      = findViewById(R.id.tv_empty);
-        tvSyncStatus = findViewById(R.id.tv_sync_status);
         tabLayout    = findViewById(R.id.tab_layout);
         bottomNav    = findViewById(R.id.bottom_nav);
         searchView   = findViewById(R.id.search_view);
@@ -283,17 +282,12 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     private void showSyncStatus(String msg) {
         runOnUiThread(() -> {
-            if (tvSyncStatus != null) {
-                tvSyncStatus.setText(msg);
-                tvSyncStatus.setVisibility(View.VISIBLE);
-            }
             if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
         });
     }
 
     private void hideSyncStatus() {
         runOnUiThread(() -> {
-            if (tvSyncStatus != null) tvSyncStatus.setVisibility(View.GONE);
             if (progressBar != null) progressBar.setVisibility(View.GONE);
         });
     }
@@ -398,7 +392,6 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             int id = item.getItemId();
             if      (id == R.id.nav_home)     { observeCurrentTab(); return true; }
             else if (id == R.id.nav_add)      { showAddPlaylistDialog(); return true; }
-            else if (id == R.id.nav_sync)     { syncNow(); return true; }
             else if (id == R.id.nav_settings) {
                 startActivity(new Intent(this, SettingsActivity.class)); return true;
             }
