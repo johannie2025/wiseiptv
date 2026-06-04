@@ -158,60 +158,37 @@ public class ActivationActivity extends AppCompatActivity {
         });
     }
 
-    // ── Téléchargement + navigation ────────────────────────────────
+    // ── Téléchargement + navigation corrigés (Style Android TV) ──────────────────
 
     /**
-     * Version sans ActivationResult : reconstruit depuis le cache prefs.
-     * Appelée quand btnAccess est cliqué alors qu'on a déjà un état ACTIVE en cache.
+     * Version sans ActivationResult : Reconstruit l'accès depuis le cache.
+     * Correction : On supprime le Thread BDD bloquant et on va DIRECTEMENT à MainActivity.
      */
     private void startDownloadAndGo() {
-        // Récupérer les DNS depuis les playlists existantes en BDD
-        AppDatabase db = AppDatabase.get(this);
-        btnAccess.setEnabled(false);
-        btnAccess.setText("Téléchargement…");
-        progressBar.setVisibility(View.VISIBLE);
-
-        new Thread(() -> {
-            // Chercher les playlists d'activation existantes
-            java.util.List<com.wdesign.wiseiptv.core.db.entity.PlaylistEntity> pls =
-                db.playlistDao().getAllSync();
-            // FIX : final pour être utilisable dans le lambda runOnUiThread
-         boolean found = false;
-for (com.wdesign.wiseiptv.core.db.entity.PlaylistEntity pl : pls) {
-    // ── CORRECTION : On accepte l'activation qu'elle soit Xtream ou M3U_URL ──
-    if (pl.isActive && (pl.type == com.wdesign.wiseiptv.core.db.entity.PlaylistEntity.TYPE_XTREAM 
-                     || pl.type == com.wdesign.wiseiptv.core.db.entity.PlaylistEntity.TYPE_M3U_URL)) {
-        found = true;
-        break;
-    }
-}
-final boolean hasActivation = found;
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                progressBar.setVisibility(View.GONE);
-                if (hasActivation) {
-                    // Playlists déjà en BDD → aller directement, MainActivity téléchargera si stale
-                    goToMain();
-                } else {
-                    // Aucune playlist → relancer une vérification complète
-                    btnAccess.setEnabled(true);
-                    btnAccess.setText("▶ Accéder au contenu");
-                    checkActivation(true);
-                }
-            });
-        }).start();
+        if (isFinishing() || isDestroyed()) return;
+        
+        SharedPreferences p = getPrefs();
+        String login = p.getString("login", "");
+        
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.putExtra(MainActivity.EXTRA_ACT_LOGIN, login);
+        
+        startActivity(intent);
+        finish();
     }
 
     /**
      * Version avec ActivationResult frais depuis le serveur.
-     * Ouvre MainActivity IMMÉDIATEMENT via les extras Intent.
-     * MainActivity reçoit login/password/dns et lance le téléchargement en background.
+     * Envoie toutes les données et va immédiatement à la MainActivity.
      */
     private void startDownloadAndGo(DeviceSecurity.ActivationResult r) {
+        if (isFinishing() || isDestroyed()) return;
+
         Intent intent = new Intent(this, MainActivity.class);
         intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login);
         intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password);
         intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt);
+        
         if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
             String[] urls    = new String[r.dnsServers.size()];
             String[] epgUrls = new String[r.dnsServers.size()];
@@ -222,6 +199,7 @@ final boolean hasActivation = found;
             intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     urls);
             intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
         }
+        
         startActivity(intent);
         finish();
     }

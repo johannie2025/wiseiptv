@@ -106,31 +106,31 @@ public class ActivationManager {
             String     lastError = null;
             int        dnsCount  = r.dnsServers.size();
 
+       // Boucle de création / mise à jour en BDD uniquement (Pas de téléchargement ici !)
             for (int i = 0; i < dnsCount; i++) {
                 DeviceSecurity.DnsEntry dns = r.dnsServers.get(i);
                 if (dns.url == null || dns.url.isEmpty()) continue;
 
                 // Chercher la playlist existante pour ce DNS ou en créer une
-                // Chercher la playlist existante pour ce DNS ou en créer une
-long existingId = i < existingIds.size() ? existingIds.get(i) : 0;
-PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
-if (pl == null) pl = new PlaylistEntity();
+                long existingId = i < existingIds.size() ? existingIds.get(i) : 0;
+                PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
+                if (pl == null) pl = new PlaylistEntity();
 
-// ── AJOUT : Détection automatique du type de lien (M3U ou Xtream) ──
-String urlBasse = dns.url.toLowerCase().trim();
-if (urlBasse.endsWith(".m3u") || urlBasse.endsWith(".m3u8") || urlBasse.contains("m3u")) {
-    pl.type = PlaylistEntity.TYPE_M3U_URL;
-    pl.name = "Playlist M3U #" + (i + 1);
-} else {
-    pl.type = PlaylistEntity.TYPE_XTREAM;
-    pl.name = dnsCount == 1 ? "Abonnement IPTV" : "IPTV #" + (i + 1);
-}
+                // ── DÉTECTION AUTOMATIQUE (Identique à la version TV) ──
+                String urlBasse = dns.url.toLowerCase().trim();
+                if (urlBasse.endsWith(".m3u") || urlBasse.endsWith(".m3u8") || urlBasse.contains("m3u")) {
+                    pl.type = PlaylistEntity.TYPE_M3U_URL;
+                    pl.name = "Playlist M3U #" + (i + 1);
+                } else {
+                    pl.type = PlaylistEntity.TYPE_XTREAM;
+                    pl.name = dnsCount == 1 ? "Abonnement IPTV" : "IPTV #" + (i + 1);
+                }
 
-pl.url        = dns.url;
-pl.username   = r.login;
-pl.password   = r.password;
-pl.isActive   = true;
-pl.lastUpdated = 0; // forcer refresh
+                pl.url        = dns.url;
+                pl.username   = r.login;
+                pl.password   = r.password;
+                pl.isActive   = true;
+                pl.lastUpdated = 0; // Marquer à 0 pour forcer MainActivity à s'en occuper
 
                 if (pl.id == 0) {
                     pl.id = db.playlistDao().insert(pl);
@@ -139,34 +139,9 @@ pl.lastUpdated = 0; // forcer refresh
                 }
                 newIds.add(pl.id);
 
-                // Feedback UI
+                // Notification légère de création
                 final String pName = pl.name;
                 cb.onProgress(pName);
-
-                // Téléchargement synchrone (on est déjà dans un thread bg)
-                try {
-                    List<com.wdesign.wiseiptv.core.db.entity.ChannelEntity> channels;
-                    if (pl.type == PlaylistEntity.TYPE_XTREAM) {
-                        channels = PlaylistLoader.loadXtreamSync(pl);
-                    } else {
-                        channels = PlaylistLoader.loadUrlSync(pl);
-                    }
-                    if (channels != null && !channels.isEmpty()) {
-                        for (com.wdesign.wiseiptv.core.db.entity.ChannelEntity ch : channels)
-                            ch.playlistId = pl.id;
-                        final List<com.wdesign.wiseiptv.core.db.entity.ChannelEntity> fCh = channels;
-                        final long fId = pl.id;
-                        db.runInTransaction(() -> {
-                            db.channelDao().deleteByPlaylist(fId);
-                            db.channelDao().insertAll(fCh);
-                        });
-                        db.playlistDao().updateTimestamp(pl.id, System.currentTimeMillis());
-                        total += channels.size();
-                    }
-                } catch (Exception e) {
-                    Log.w(TAG, "Erreur DL " + pl.name + ": " + e.getMessage());
-                    lastError = e.getMessage();
-                }
             }
 
             // Supprimer les anciennes playlists qui ne sont plus dans le nouveau set
