@@ -16,7 +16,6 @@ import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.mobile.R;
 import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
-import com.wdesign.wiseiptv.mobile.util.ActivationManager;
 import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
 import java.util.ArrayList;
 import java.util.List;
