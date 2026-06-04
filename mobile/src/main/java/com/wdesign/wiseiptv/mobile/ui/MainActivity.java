@@ -131,63 +131,90 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
 // ── Téléchargement Arrière-plan géré par MainActivity (Style Android TV) ──
 
-    private void startBackgroundSync() {
-        Intent intent = getIntent();
-        String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
-        String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
-        String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
-        String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
-        String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
+private void startBackgroundSync() {
+    Intent intent = getIntent();
+    if (intent == null) return;
 
-        // CHEMIN 1 : Arrivée fraîche depuis l'activation
-        if (login != null && dnsUrls != null && dnsUrls.length > 0) {
-            if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
-            
-            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
-            for (int i = 0; i < dnsUrls.length; i++) {
-                String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length) ? dnsEpgUrls[i] : "";
-                entries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
-            }
-            DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
-                    DeviceSecurity.getOrCreateKey(this),
-                    login, password != null ? password : "",
-                    expires != null ? expires : "", entries);
+    String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
+    String password = intent.getStringExtra(EXTRA_ACT_PASSWORD);
+    String expires  = intent.getStringExtra(EXTRA_ACT_EXPIRES);
+    String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
+    String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
 
-            // Étape 1 : On enregistre proprement les profils de playlists en BDD via le manager
-            ActivationManager.upsertAndDownloadAll(this, db, result, new ActivationManager.DownloadCallback() {
-                @Override public void onProgress(String playlistName) {}
-
-                @Override
-                public void onDone(int totalChannels) {
-                    // Étape 2 : Les profils sont prêts, on lance le téléchargement asynchrone des flux (comme sur TV)
-                    runOnUiThread(() -> loadPlaylistsSequentially(0));
-                }
-
-                @Override
-                public void onError(String msg) {
-                    runOnUiThread(() -> { if (progressBar != null) progressBar.setVisibility(View.GONE); });
-                }
-            });
-            return;
-        }
-
-        // CHEMIN 2 : Ouverture directe via le cache existant
-        SharedPreferences prefs = getSharedPreferences("wise_activation", Context.MODE_PRIVATE);
-        String savedStatus = prefs.getString("status", "UNKNOWN");
+    // CHEMIN 1 : Arrivée fraîche depuis l'activation
+    if (login != null && dnsUrls != null && dnsUrls.length > 0) {
+        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
         
-        if ("ACTIVE".equals(savedStatus)) {
-            // Utilise le rafraîchissement automatique global s'il y a du contenu périmé
-            PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
-                @Override
-                public void onDone(int count) {
-                    if (count > 0) {
-                        runOnUiThread(() -> observeCurrentTab());
-                    }
-                }
-                @Override public void onError(String msg) { Log.w("MainActivity", "Refresh caché échoué: " + msg); }
-            });
+        List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
+        for (int i = 0; i < dnsUrls.length; i++) {
+            if (dnsUrls[i] == null || dnsUrls[i].isEmpty()) continue;
+            String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length && dnsEpgUrls[i] != null) ? dnsEpgUrls[i] : "";
+            entries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
         }
+
+        DeviceSecurity.ActivationResult result = new DeviceSecurity.ActivationResult(
+                DeviceSecurity.getOrCreateKey(this),
+                login, 
+                password != null ? password : "",
+                expires != null ? expires : "", 
+                entries
+        );
+
+        // Étape 1 : Enregistrement en BDD en arrière-plan
+        ActivationManager.upsertAndDownloadAll(getApplicationContext(), db, result, new ActivationManager.DownloadCallback() {
+            @Override 
+            public void onProgress(String playlistName) {
+                // Optionnel : afficher quelle playlist est créée
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed() && tvEmpty != null) {
+                        tvEmpty.setText("Configuring: " + playlistName);
+                    }
+                });
+            }
+
+            @Override
+            public void onDone(int totalChannels) {
+                // Étape 2 : Profils créés avec succès, on lance le téléchargement séquentiel des flux
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (tvEmpty != null) tvEmpty.setText("");
+                    loadPlaylistsSequentially(0);
+                });
+            }
+
+            @Override
+            public void onError(String msg) {
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (progressBar != null) progressBar.setVisibility(View.GONE);
+                    if (tvEmpty != null) tvEmpty.setText("");
+                    Toast.makeText(MainActivity.this, "Erreur de configuration: " + msg, Toast.LENGTH_LONG).show();
+                    observeCurrentTab(); // On essaie quand même de charger le cache au cas où
+                });
+            }
+        });
+        return;
     }
+
+    // CHEMIN 2 : Ouverture directe via le cache existant
+    SharedPreferences prefs = getSharedPreferences("wise_activation", Context.MODE_PRIVATE);
+    String savedStatus = prefs.getString("status", "UNKNOWN");
+    
+    if ("ACTIVE".equals(savedStatus)) {
+        PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
+            @Override
+            public void onDone(int count) {
+                if (count > 0 && !isFinishing() && !isDestroyed()) {
+                    runOnUiThread(() -> observeCurrentTab());
+                }
+            }
+            @Override 
+            public void onError(String msg) { 
+                Log.w("MainActivity", "Refresh caché échoué: " + msg); 
+            }
+        });
+    }
+}
 
     /** Télécharge les playlists enregistrées les unes après les autres sans bloquer l'interface */
     private void loadPlaylistsSequentially(final int index) {
