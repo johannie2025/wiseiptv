@@ -6,10 +6,6 @@
         <item name="colorAccent">@color/wise_red</item>
         <item name="android:colorBackground">@color/wise_bg</item>
         <item name="android:windowBackground">@color/wise_bg</item>
-        <!-- Headers panel (barre latérale) -->
-        <item name="browsePanelBackground">@color/wise_brand</item>
-        <!-- Surbrillance focus rouge -->
-        <item name="android:colorControlHighlight">@color/focus_overlay</item>
     </style>
 
     <style name="Theme.WiseIPTV.TV.Fullscreen" parent="Theme.Leanback">
