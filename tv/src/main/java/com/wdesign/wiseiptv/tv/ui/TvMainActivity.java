@@ -347,9 +347,15 @@ public class TvMainActivity extends FragmentActivity {
 
         // Chemin 3 : playlists manuelles stale
         Log.d(TAG, "Sync chemin 3: playlists stale");
-        PlaylistLoader.refreshStaleIfNeeded(db, count ->
-            runOnUiThread(() -> Toast.makeText(this, "✅ " + count + " chaînes", Toast.LENGTH_SHORT).show())
-        );
+        PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
+            @Override public void onDone(int count) {
+                runOnUiThread(() -> Toast.makeText(TvMainActivity.this,
+                    "✅ " + count + " chaînes", Toast.LENGTH_SHORT).show());
+            }
+            @Override public void onError(String msg) {
+                android.util.Log.w(TAG, "refreshStale: " + msg);
+            }
+        });
     }
 
     private void launchDownload(DeviceSecurity.ActivationResult result) {
