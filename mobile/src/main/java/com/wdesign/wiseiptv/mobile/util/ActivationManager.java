@@ -111,17 +111,26 @@ public class ActivationManager {
                 if (dns.url == null || dns.url.isEmpty()) continue;
 
                 // Chercher la playlist existante pour ce DNS ou en créer une
-                long existingId = i < existingIds.size() ? existingIds.get(i) : 0;
-                PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
-                if (pl == null) pl = new PlaylistEntity();
+                // Chercher la playlist existante pour ce DNS ou en créer une
+long existingId = i < existingIds.size() ? existingIds.get(i) : 0;
+PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
+if (pl == null) pl = new PlaylistEntity();
 
-                pl.name       = dnsCount == 1 ? "Abonnement IPTV" : "IPTV #" + (i + 1);
-                pl.type       = PlaylistEntity.TYPE_XTREAM;
-                pl.url        = dns.url;
-                pl.username   = r.login;
-                pl.password   = r.password;
-                pl.isActive   = true;
-                pl.lastUpdated = 0; // forcer refresh
+// ── AJOUT : Détection automatique du type de lien (M3U ou Xtream) ──
+String urlBasse = dns.url.toLowerCase().trim();
+if (urlBasse.endsWith(".m3u") || urlBasse.endsWith(".m3u8") || urlBasse.contains("m3u")) {
+    pl.type = PlaylistEntity.TYPE_M3U_URL;
+    pl.name = "Playlist M3U #" + (i + 1);
+} else {
+    pl.type = PlaylistEntity.TYPE_XTREAM;
+    pl.name = dnsCount == 1 ? "Abonnement IPTV" : "IPTV #" + (i + 1);
+}
+
+pl.url        = dns.url;
+pl.username   = r.login;
+pl.password   = r.password;
+pl.isActive   = true;
+pl.lastUpdated = 0; // forcer refresh
 
                 if (pl.id == 0) {
                     pl.id = db.playlistDao().insert(pl);

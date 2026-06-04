@@ -176,15 +176,16 @@ public class ActivationActivity extends AppCompatActivity {
             java.util.List<com.wdesign.wiseiptv.core.db.entity.PlaylistEntity> pls =
                 db.playlistDao().getAllSync();
             // FIX : final pour être utilisable dans le lambda runOnUiThread
-            boolean found = false;
-            for (com.wdesign.wiseiptv.core.db.entity.PlaylistEntity pl : pls) {
-                if (pl.isActive && pl.type ==
-                    com.wdesign.wiseiptv.core.db.entity.PlaylistEntity.TYPE_XTREAM) {
-                    found = true;
-                    break;
-                }
-            }
-            final boolean hasActivation = found;
+         boolean found = false;
+for (com.wdesign.wiseiptv.core.db.entity.PlaylistEntity pl : pls) {
+    // ── CORRECTION : On accepte l'activation qu'elle soit Xtream ou M3U_URL ──
+    if (pl.isActive && (pl.type == com.wdesign.wiseiptv.core.db.entity.PlaylistEntity.TYPE_XTREAM 
+                     || pl.type == com.wdesign.wiseiptv.core.db.entity.PlaylistEntity.TYPE_M3U_URL)) {
+        found = true;
+        break;
+    }
+}
+final boolean hasActivation = found;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 progressBar.setVisibility(View.GONE);

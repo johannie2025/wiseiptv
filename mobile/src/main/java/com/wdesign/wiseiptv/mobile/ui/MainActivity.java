@@ -135,15 +135,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                     @Override public void onProgress(String name) {
                         // optionnel : afficher le nom dans une TextView si tu en as une
                     }
-                    @Override public void onDone(int total) {
-                        runOnUiThread(() -> {
-                            if (isFinishing() || isDestroyed()) return;
-                            if (progressBar != null) progressBar.setVisibility(View.GONE);
-                            observeCurrentTab();
-                            Toast.makeText(MainActivity.this,
-                                "✅ " + total + " chaînes chargées", Toast.LENGTH_SHORT).show();
-                        });
-                    }
+                  @Override public void onDone(int total) {
+    runOnUiThread(() -> {
+        if (isFinishing() || isDestroyed()) return;
+        if (progressBar != null) progressBar.setVisibility(View.GONE);
+        
+        // ── CORRECTION : Force le rafraîchissement complet des LiveData et des adaptateurs ──
+        observeCurrentTab(); 
+        
+        Toast.makeText(MainActivity.this,
+            "✅ Synchronisation terminée : " + total + " chaînes chargées", Toast.LENGTH_SHORT).show();
+    });
+}
                     @Override public void onError(String msg) {
                         runOnUiThread(() -> {
                             if (isFinishing() || isDestroyed()) return;
