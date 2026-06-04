@@ -16,16 +16,20 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * ActivationActivity — adapté de TvActivationActivity (version stable).
+ * ActivationActivity — PREMIER ÉCRAN de l'APK Mobile.
  *
- * Flux identique à la TV :
- *  1. Cache valide → goToMain(false, null) directement
- *  2. btnCheck    → checkActivation(false) : affiche seulement
- *  3. btnAccess   → checkActivation(true)  : vérifie + navigue avec résultat frais
- *  4. Hors-ligne  → goToMain(false, null)  : cache uniquement
+ * Affiche :
+ *  • Device Key (à communiquer à l'admin/revendeur pour activation)
+ *  • Statut : EN ATTENTE / ACTIF / EXPIRÉ / DÉSACTIVÉ / HORS LIGNE
+ *  • Provider, Login, Password (renseignés automatiquement après activation)
+ *  • Bouton [Vérifier l'activation] → interroge le panel
+ *  • Bouton [Accéder au contenu]    → visible seulement si ACTIF
  *
- * goToMain() passe TOUJOURS les extras complets à MainActivity.
- * saveCache() stocke : status, expires_at, login, password, dns_urls, dns_epg_urls
+ * Flux :
+ *  1. User installe l'APK → voit sa device_key → la communique à admin
+ *  2. Admin active le device dans le panel web
+ *  3. User appuie sur "Vérifier" → serveur renvoie login/password/DNS
+ *  4. User appuie sur "Accéder au contenu" → MainActivity télécharge les playlists
  */
 public class ActivationActivity extends AppCompatActivity {
 
@@ -37,14 +41,17 @@ public class ActivationActivity extends AppCompatActivity {
     private Button      btnCheck, btnAccess, btnCopy;
     private ProgressBar progressBar;
 
+    // Résultat frais gardé en mémoire pour goToMain()
+    private DeviceSecurity.ActivationResult lastResult = null;
     private boolean isCheckInProgress = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Cache valide → passer directement à MainActivity
         if (isActiveAndNotExpired()) {
-            goToMain(false, null);
+            goToMain(null);
             return;
         }
 
@@ -72,19 +79,18 @@ public class ActivationActivity extends AppCompatActivity {
             Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
         });
 
-        btnCheck.setOnClickListener(v -> checkActivation(false));
-        // Identique à TV : btnAccess déclenche toujours checkActivation(true)
-        btnAccess.setOnClickListener(v -> checkActivation(true));
+        btnCheck.setOnClickListener(v -> checkActivation());
 
-        String saved = getPrefs().getString("status", "");
-        if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) showInactive(saved);
+        // Accéder au contenu → passer le résultat frais (ou cache si hors-ligne)
+        btnAccess.setOnClickListener(v -> goToMain(lastResult));
 
-        checkActivation(false);
+        // Vérification automatique au démarrage
+        checkActivation();
     }
 
     // ── Vérification ───────────────────────────────────────────────
 
-    private void checkActivation(boolean goOnSuccess) {
+    private void checkActivation() {
         if (isCheckInProgress) return;
         isCheckInProgress = true;
         setLoading(true);
@@ -93,21 +99,19 @@ public class ActivationActivity extends AppCompatActivity {
             @Override
             public void onActive(DeviceSecurity.ActivationResult r) {
                 saveCache(r);
+                lastResult = r;
                 runOnUiThread(() -> {
                     isCheckInProgress = false;
                     if (isFinishing() || isDestroyed()) return;
                     setLoading(false);
-                    if (goOnSuccess) {
-                        goToMain(true, r); // résultat frais → extras complets
-                    } else {
-                        showActive(r);
-                    }
+                    showActive(r);
                 });
             }
 
             @Override
             public void onInactive(String status, String message) {
                 clearCache(status);
+                lastResult = null;
                 runOnUiThread(() -> {
                     isCheckInProgress = false;
                     if (isFinishing() || isDestroyed()) return;
@@ -129,18 +133,18 @@ public class ActivationActivity extends AppCompatActivity {
         });
     }
 
-    // ── Navigation — identique à TvActivationActivity.goToMain() ───
+    // ── Navigation ─────────────────────────────────────────────────
 
     /**
-     * @param animate  true = transition normale, false = sans animation (retour cache)
-     * @param r        résultat frais (null = navigation depuis cache)
+     * Navigue vers MainActivity en passant login/password/DNS en extras.
+     * @param r  résultat frais (null = navigation depuis cache SharedPreferences)
      */
-    private void goToMain(boolean animate, DeviceSecurity.ActivationResult r) {
+    private void goToMain(DeviceSecurity.ActivationResult r) {
         if (isFinishing() || isDestroyed()) return;
         Intent intent = new Intent(this, MainActivity.class);
 
         if (r != null) {
-            // Résultat frais : extras complets depuis le serveur
+            // Résultat frais du serveur
             intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login    != null ? r.login    : "");
             intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password != null ? r.password : "");
             intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt != null ? r.expiresAt : "");
@@ -170,7 +174,6 @@ public class ActivationActivity extends AppCompatActivity {
         }
 
         startActivity(intent);
-        if (!animate) overridePendingTransition(0, 0);
         finish();
     }
 
@@ -197,15 +200,15 @@ public class ActivationActivity extends AppCompatActivity {
         if (status.contains("EXPIRED")) {
             tvStatus.setText("⏰ EXPIRÉ");
             tvStatus.setTextColor(0xFFFF9800);
-            tvStatusDetail.setText("Abonnement expiré.\nContactez votre revendeur pour renouveler.");
+            tvStatusDetail.setText("Votre abonnement a expiré.\nContactez votre revendeur pour renouveler.");
         } else if (status.contains("DISABLED")) {
             tvStatus.setText("🚫 DÉSACTIVÉ");
             tvStatus.setTextColor(0xFFF44336);
-            tvStatusDetail.setText("Accès suspendu.\nContactez votre revendeur.");
+            tvStatusDetail.setText("Votre accès a été suspendu.\nContactez votre revendeur.");
         } else {
-            tvStatus.setText("❌ NON ACTIVÉ");
+            tvStatus.setText("❌ NON ENREGISTRÉ");
             tvStatus.setTextColor(0xFFF44336);
-            tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur pour activation.");
+            tvStatusDetail.setText("Ce device n'est pas encore activé.\nCommuniquez votre Device Key à votre revendeur.");
         }
     }
 
@@ -214,17 +217,18 @@ public class ActivationActivity extends AppCompatActivity {
         btnAccess.setVisibility(View.GONE);
         tvStatus.setText("⏳ EN ATTENTE");
         tvStatus.setTextColor(0xFFFFEB3B);
-        tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur.\n(" + err + ")");
+        tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur.\n\n(Erreur : " + err + ")");
     }
 
     private void showOffline() {
-        tvStatus.setText("📡 HORS LIGNE");
+        tvStatus.setText("📡 HORS LIGNE (cache)");
         tvStatus.setTextColor(0xFF9E9E9E);
-        tvStatusDetail.setText("Pas de connexion. Accès via le cache.");
+        tvStatusDetail.setText("Connexion impossible. Accès accordé depuis le cache.");
         btnAccess.setVisibility(View.VISIBLE);
         btnAccess.setEnabled(true);
         btnAccess.setText("▶ Continuer hors ligne");
-        btnAccess.setOnClickListener(v -> goToMain(false, null));
+        // Hors-ligne → cache uniquement (lastResult == null → goToMain lit les prefs)
+        btnAccess.setOnClickListener(v -> goToMain(null));
     }
 
     // ── Cache ───────────────────────────────────────────────────────
@@ -278,6 +282,6 @@ public class ActivationActivity extends AppCompatActivity {
         if (progressBar == null || btnCheck == null) return;
         progressBar.setVisibility(on ? View.VISIBLE : View.GONE);
         btnCheck.setEnabled(!on);
-        btnCheck.setText(on ? "Vérification…" : "🔄 Vérifier l'activation");
+        btnCheck.setText(on ? "Vérification…" : "Vérifier l'activation");
     }
 }
