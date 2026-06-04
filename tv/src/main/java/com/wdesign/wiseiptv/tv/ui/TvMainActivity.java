@@ -38,21 +38,38 @@ public class TvMainActivity extends FragmentActivity {
     private BrowseSupportFragment browseFragment;
     private ArrayObjectAdapter    rowsAdapter;
     private AppDatabase           db;
-    private ProgressBar           progressBar;
+
+    // Barre supérieure custom
+    private TextView    btnSearch, btnAdd, btnSync, btnRecents, tvSyncStatus;
+    private ProgressBar progressBar;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_tv_main);
-        db          = AppDatabase.get(this);
-        progressBar = findViewById(R.id.progress_bar);
+
+        db = AppDatabase.get(this);
+
+        // Références barre top
+        btnSearch    = findViewById(R.id.btn_search);
+        btnAdd       = findViewById(R.id.btn_add);
+        btnSync      = findViewById(R.id.btn_sync);
+        btnRecents   = findViewById(R.id.btn_recents);
+        tvSyncStatus = findViewById(R.id.tv_sync_status);
+        progressBar  = findViewById(R.id.progress_bar);
+
+        // Boutons top bar
+        btnSearch.setOnClickListener(v -> showSearchDialog());
+        btnAdd.setOnClickListener(v -> showAddPlaylistDialog());
+        btnSync.setOnClickListener(v -> syncNow());
+        btnRecents.setOnClickListener(v -> scrollToRecents());
+
         setupBrowseFragment();
         observeAllRows();
         startBackgroundSync();
     }
 
-    // ── BrowseFragment ────────────────────────────────────────────
-
+// ── BrowseFragment ────────────────────────────────────────────
     private void setupBrowseFragment() {
         browseFragment = (BrowseSupportFragment)
             getSupportFragmentManager().findFragmentById(R.id.browse_fragment);
@@ -62,79 +79,107 @@ public class TvMainActivity extends FragmentActivity {
                 .add(R.id.browse_fragment, browseFragment).commit();
         }
 
-        browseFragment.setTitle("");
-        try {
-            browseFragment.setBadgeDrawable(
-                getResources().getDrawable(R.mipmap.ic_launcher, getTheme()));
-        } catch (Exception e) {
-            browseFragment.setTitle("Wise IPTV");
-        }
+        // ── FIX TV : Masquer complètement l'en-tête vertical gauche natif ──
+        // Désactive l'affichage de la colonne des catégories native de Leanback
+        browseFragment.setHeadersState(BrowseSupportFragment.HEADERS_DISABLED);
+        // Empêche le retour automatique vers l'en-tête lors de l'appui sur le bouton "Retour" de la télécommande
+        browseFragment.setHeadersTransitionOnBackEnabled(false);
 
+        // Titre vide — notre barre custom le remplace
+        browseFragment.setTitle("");
         browseFragment.setBrandColor(getResources().getColor(R.color.wise_brand, getTheme()));
-        browseFragment.setSearchAffordanceColor(getResources().getColor(R.color.wise_red, getTheme()));
+
+        // FIX : icône recherche native Leanback désactivée visuellement
+        // On garde setOnSearchClickedListener pour la loupe mais elle appelle notre dialog
+        browseFragment.setOnSearchClickedListener(v -> showSearchDialog());
+        // Couleur = transparente pour masquer la loupe Leanback (notre barre la remplace)
+        browseFragment.setSearchAffordanceColor(0x00000000);
 
         rowsAdapter = new ArrayObjectAdapter(new ListRowPresenter());
         browseFragment.setAdapter(rowsAdapter);
 
-        // FIX: icône recherche (loupe) → dialog de RECHERCHE de chaînes
-        browseFragment.setOnSearchClickedListener(v -> showSearchDialog());
-
-        // Clic chaîne → lecture
         browseFragment.setOnItemViewClickedListener((ivh, item, rvh, row) -> {
             if (item instanceof ChannelEntity) openPlayer((ChannelEntity) item);
-            else if (item instanceof ActionItem) ((ActionItem) item).run();
         });
     }
 
-    // ── FIX: dialog de recherche de chaînes ──────────────────────
+    // ── 🔍 Recherche — dialog avec saisie + résultats live ────────
 
     private void showSearchDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog);
+        AlertDialog.Builder b = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_NoActionBar);
         b.setTitle("🔍 Rechercher une chaîne");
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(48, 24, 48, 8);
 
+        // Champ de saisie
         EditText etSearch = new EditText(this);
-        etSearch.setHint("Nom de la chaîne…");
+        etSearch.setHint("Tapez le nom de la chaîne…");
         etSearch.setSingleLine(true);
-        etSearch.requestFocus();
+        etSearch.setTextSize(16f);
         layout.addView(etSearch);
 
-        // ListView de résultats live (se met à jour pendant la saisie)
+        // Compteur résultats
+        TextView tvCount = new TextView(this);
+        tvCount.setTextSize(12f);
+        tvCount.setPadding(0, 6, 0, 6);
+        layout.addView(tvCount);
+
+        // Liste résultats (focusable D-Pad)
         ListView lv = new ListView(this);
-        lv.setMinimumHeight(300);
+        lv.setMinimumHeight(400);
+        lv.setDividerHeight(1);
         layout.addView(lv);
 
+        final List<ChannelEntity> found = new ArrayList<>();
         ArrayAdapter<String> listAdapter = new ArrayAdapter<>(this,
             android.R.layout.simple_list_item_1, new ArrayList<>());
         lv.setAdapter(listAdapter);
 
-        final List<ChannelEntity> found = new ArrayList<>();
+        final Handler debounce = new Handler(Looper.getMainLooper());
+        final Runnable[] searchRunnable = {null};
 
         etSearch.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b2, int c) {}
             @Override public void onTextChanged(CharSequence s, int a, int b2, int c) {}
             @Override public void afterTextChanged(Editable s) {
-                String q = s.toString().trim();
-                if (q.length() < 2) { listAdapter.clear(); found.clear(); return; }
-                Executors.newSingleThreadExecutor().execute(() -> {
-                    // Recherche synchrone directe
-                    List<ChannelEntity> results = db.channelDao().searchSync(q);
-                    runOnUiThread(() -> {
+                // Debounce 300ms pour éviter trop de requêtes
+                if (searchRunnable[0] != null) debounce.removeCallbacks(searchRunnable[0]);
+                searchRunnable[0] = () -> {
+                    String q = s.toString().trim();
+                    if (q.isEmpty()) {
                         listAdapter.clear(); found.clear();
-                        for (ChannelEntity ch : results) {
-                            listAdapter.add(ch.name + (ch.groupTitle != null ? "  [" + ch.groupTitle + "]" : ""));
-                            found.add(ch);
-                        }
-                        listAdapter.notifyDataSetChanged();
+                        tvCount.setText("");
+                        return;
+                    }
+                    Executors.newSingleThreadExecutor().execute(() -> {
+                        List<ChannelEntity> results = db.channelDao().searchSync(q);
+                        runOnUiThread(() -> {
+                            listAdapter.clear(); found.clear();
+                            if (results.isEmpty()) {
+                                tvCount.setText("Aucun résultat");
+                            } else {
+                                tvCount.setText(results.size() + " résultat(s)");
+                                for (ChannelEntity ch : results) {
+                                    String label = ch.name;
+                                    if (ch.groupTitle != null && !ch.groupTitle.isEmpty())
+                                        label += "  [" + ch.groupTitle + "]";
+                                    listAdapter.add(label);
+                                    found.add(ch);
+                                }
+                            }
+                            listAdapter.notifyDataSetChanged();
+                        });
                     });
-                });
+                };
+                debounce.postDelayed(searchRunnable[0], 300);
             }
         });
 
         AlertDialog dialog = b.create();
+        dialog.setView(layout);
+
         lv.setOnItemClickListener((parent, view, pos, id) -> {
             if (pos < found.size()) {
                 dialog.dismiss();
@@ -142,82 +187,12 @@ public class TvMainActivity extends FragmentActivity {
             }
         });
 
-        b.setNegativeButton("Fermer", null);
+        dialog.setButton(AlertDialog.BUTTON_NEGATIVE, "Fermer",
+            (d, w) -> d.dismiss());
+
         dialog.show();
-    }
-
-    // ── Ligne d'actions ───────────────────────────────────────────
-
-    /**
-     * Ligne "Actions" toujours EN TÊTE (id=0).
-     * Boutons horizontaux : ➕ Ajouter | 🔄 Synchroniser | 🔍 Rechercher | 🕐 Récents
-     * Apparaissent au même niveau que la barre Leanback.
-     */
-    private void addActionsRow() {
-        ArrayObjectAdapter actionsAdapter = new ArrayObjectAdapter(new ActionPresenter());
-        actionsAdapter.add(new ActionItem("➕ Ajouter",      this::showAddPlaylistDialog));
-        actionsAdapter.add(new ActionItem("🔄 Synchroniser", this::syncNow));
-        actionsAdapter.add(new ActionItem("🔍 Rechercher",   this::showSearchDialog));
-        // Récents inline dans les actions
-        actionsAdapter.add(new ActionItem("🕐 Récents",      this::scrollToRecents));
-
-        ListRow actionsRow = new ListRow(new HeaderItem(0, ""), actionsAdapter);
-        if (rowsAdapter.size() == 0 || ((ListRow) rowsAdapter.get(0)).getHeaderItem().getId() != 0) {
-            rowsAdapter.add(0, actionsRow);
-        } else {
-            rowsAdapter.replace(0, actionsRow);
-        }
-    }
-
-    private void scrollToRecents() {
-        // Sélectionner la row Récents dans le BrowseFragment
-        for (int i = 0; i < rowsAdapter.size(); i++) {
-            if (((ListRow) rowsAdapter.get(i)).getHeaderItem().getId() == 9002) {
-                browseFragment.setSelectedPosition(i);
-                return;
-            }
-        }
-        Toast.makeText(this, "Aucun récent pour l'instant", Toast.LENGTH_SHORT).show();
-    }
-
-    // ── ActionItem / ActionPresenter ──────────────────────────────
-
-    private static class ActionItem {
-        final String label;
-        final Runnable action;
-        ActionItem(String label, Runnable action) { this.label = label; this.action = action; }
-        void run() { action.run(); }
-    }
-
-    private static class ActionPresenter extends Presenter {
-        @Override public ViewHolder onCreateViewHolder(android.view.ViewGroup parent) {
-            TextView tv = new TextView(parent.getContext());
-            tv.setPadding(40, 22, 40, 22);
-            tv.setTextSize(15f);
-            tv.setTextColor(0xFFFFFFFF);
-            tv.setFocusable(true);
-            tv.setFocusableInTouchMode(true);
-            tv.setClickable(true);
-
-            android.graphics.drawable.StateListDrawable sl = new android.graphics.drawable.StateListDrawable();
-            android.graphics.drawable.GradientDrawable focused = new android.graphics.drawable.GradientDrawable();
-            focused.setColor(0xFFE50914); focused.setCornerRadius(8f);
-            android.graphics.drawable.GradientDrawable normal = new android.graphics.drawable.GradientDrawable();
-            normal.setColor(0xFF1A3D6E); normal.setCornerRadius(8f);
-            sl.addState(new int[]{android.R.attr.state_focused}, focused);
-            sl.addState(new int[]{}, normal);
-            tv.setBackground(sl);
-
-            android.view.ViewGroup.LayoutParams lp = new android.view.ViewGroup.LayoutParams(
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-            tv.setLayoutParams(lp);
-            return new ViewHolder(tv);
-        }
-        @Override public void onBindViewHolder(ViewHolder vh, Object item) {
-            ((TextView) vh.view).setText(((ActionItem) item).label);
-        }
-        @Override public void onUnbindViewHolder(ViewHolder vh) {}
+        // Focus immédiat sur le champ de saisie
+        etSearch.post(etSearch::requestFocus);
     }
 
     // ── Rows LiveData ─────────────────────────────────────────────
@@ -225,9 +200,7 @@ public class TvMainActivity extends FragmentActivity {
     private void observeAllRows() {
         TvCardPresenter p = new TvCardPresenter();
 
-        addActionsRow();
-
-        // Récents EN HAUT (après actions, id=9002)
+        // Récents EN PREMIER
         loadRecentsRow();
 
         // Live par groupes
@@ -244,7 +217,6 @@ public class TvMainActivity extends FragmentActivity {
             }
         });
 
-        // Films
         db.channelDao().getFilmGroups().observe(this, groups -> {
             if (groups == null) return;
             removeRowsWithIdRange(2000, 2999);
@@ -258,7 +230,6 @@ public class TvMainActivity extends FragmentActivity {
             }
         });
 
-        // Séries
         db.channelDao().getSeriesGroups().observe(this, groups -> {
             if (groups == null) return;
             removeRowsWithIdRange(3000, 3999);
@@ -272,7 +243,6 @@ public class TvMainActivity extends FragmentActivity {
             }
         });
 
-        // Favoris
         db.channelDao().getFavorites().observe(this, list -> {
             if (list != null && !list.isEmpty()) upsertRow("❤️ Favoris", 9001, p, list);
             else removeRow(9001);
@@ -290,11 +260,10 @@ public class TvMainActivity extends FragmentActivity {
                 rowsAdapter.replace(i, newRow); return;
             }
         }
-        // Insertion ordonnée: actions(0) → récents(9002) → live(1000+) → films(2000+) → series(3000+) → favoris(9001)
         int insertAt = rowsAdapter.size();
         for (int i = 0; i < rowsAdapter.size(); i++) {
             long rid = ((ListRow) rowsAdapter.get(i)).getHeaderItem().getId();
-            if (rid != 0 && rid > id) { insertAt = i; break; }
+            if (rid > id && rid != 9002) { insertAt = i; break; }
         }
         rowsAdapter.add(insertAt, newRow);
     }
@@ -315,6 +284,16 @@ public class TvMainActivity extends FragmentActivity {
     }
 
     // ── Récents ───────────────────────────────────────────────────
+
+    private void scrollToRecents() {
+        for (int i = 0; i < rowsAdapter.size(); i++) {
+            if (((ListRow) rowsAdapter.get(i)).getHeaderItem().getId() == 9002) {
+                browseFragment.setSelectedPosition(i);
+                return;
+            }
+        }
+        Toast.makeText(this, "Aucun récent", Toast.LENGTH_SHORT).show();
+    }
 
     private void saveRecent(long channelId) {
         SharedPreferences prefs = getSharedPreferences(PREFS_RECENTS, Context.MODE_PRIVATE);
@@ -349,14 +328,13 @@ public class TvMainActivity extends FragmentActivity {
         });
     }
 
-    // ── Téléchargement background ─────────────────────────────────
+    // ── Sync background ───────────────────────────────────────────
+    //
+    // APPROCHE : même logique que "Ajouter une playlist" + "Charger",
+    // mais automatique, DNS par DNS, depuis les prefs ou les extras.
+    // Chaque DNS → PlaylistEntity en DB → PlaylistLoader.load() séquentiel.
+    // Les LiveData observers affichent les chaînes dès que chaque DNS est chargé.
 
-    /**
-     * FIX DOWNLOAD — 3 chemins:
-     * 1. Extras depuis TvActivationActivity (premier lancement / bouton Accéder)
-     * 2. Prefs "wise_activation_tv" (reboot, rotation)
-     * 3. Playlists manuelles stale
-     */
     private void startBackgroundSync() {
         Intent intent = getIntent();
         String login    = intent.getStringExtra(EXTRA_ACT_LOGIN);
@@ -365,22 +343,16 @@ public class TvMainActivity extends FragmentActivity {
         String[] dnsUrls    = intent.getStringArrayExtra(EXTRA_ACT_DNS_URLS);
         String[] dnsEpgUrls = intent.getStringArrayExtra(EXTRA_ACT_DNS_EPG_URLS);
 
-        // Chemin 1 : extras frais
+        // Chemin 1 : extras depuis TvActivationActivity
         if (login != null && dnsUrls != null && dnsUrls.length > 0) {
-            Log.d(TAG, "Sync chemin 1: extras DNS=" + dnsUrls.length);
-            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
-            for (int i = 0; i < dnsUrls.length; i++) {
-                String epg = (dnsEpgUrls != null && i < dnsEpgUrls.length) ? dnsEpgUrls[i] : "";
-                entries.add(new DeviceSecurity.DnsEntry(dnsUrls[i], epg, i));
-            }
-            launchDownload(new DeviceSecurity.ActivationResult(
-                DeviceSecurity.getOrCreateKey(this),
-                login, password != null ? password : "",
-                expires != null ? expires : "", entries));
+            Log.d(TAG, "Sync ch1: extras DNS=" + dnsUrls.length);
+            loadDnsSequentially(login, password != null ? password : "",
+                expires != null ? expires : "", dnsUrls,
+                dnsEpgUrls != null ? dnsEpgUrls : new String[0]);
             return;
         }
 
-        // Chemin 2 : prefs
+        // Chemin 2 : prefs sauvegardées par TvActivationActivity.saveCache()
         SharedPreferences prefs = getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE);
         String savedStatus = prefs.getString("status",     "UNKNOWN");
         String savedLogin  = prefs.getString("login",      null);
@@ -389,73 +361,147 @@ public class TvMainActivity extends FragmentActivity {
         String savedDnsRaw = prefs.getString("dns_urls",   "");
 
         if ("ACTIVE".equals(savedStatus) && savedLogin != null && !savedDnsRaw.isEmpty()) {
-            Log.d(TAG, "Sync chemin 2: prefs dns=" + savedDnsRaw);
+            Log.d(TAG, "Sync ch2: prefs dns=" + savedDnsRaw);
             String[] urls = savedDnsRaw.split(",");
             String[] epgs = prefs.getString("dns_epg_urls", "").split(",");
-            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
-            for (int i = 0; i < urls.length; i++) {
-                if (urls[i].trim().isEmpty()) continue;
-                entries.add(new DeviceSecurity.DnsEntry(urls[i].trim(),
-                    i < epgs.length ? epgs[i].trim() : "", i));
-            }
-            if (!entries.isEmpty()) {
-                launchDownload(new DeviceSecurity.ActivationResult(
-                    DeviceSecurity.getOrCreateKey(this),
-                    savedLogin, savedPass, savedExp, entries));
-                return;
-            }
+            loadDnsSequentially(savedLogin, savedPass, savedExp, urls, epgs);
+            return;
         }
 
-        // Chemin 3 : stale refresh
-        Log.d(TAG, "Sync chemin 3: stale");
+        // Chemin 3 : playlists manuelles existantes (refresh si stale)
+        Log.d(TAG, "Sync ch3: stale refresh");
         PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
-            @Override public void onDone(int count) {
+            @Override public void onDone(int c) {
                 runOnUiThread(() -> Toast.makeText(TvMainActivity.this,
-                    "✅ " + count + " chaînes", Toast.LENGTH_SHORT).show());
+                    "✅ " + c + " chaînes", Toast.LENGTH_SHORT).show());
             }
             @Override public void onError(String msg) { Log.w(TAG, "stale: " + msg); }
         });
     }
 
-    private void launchDownload(DeviceSecurity.ActivationResult result) {
-        showProgress(true);
-        ActivationManager.upsertAndDownloadAll(getApplicationContext(), db, result,
-            new ActivationManager.DownloadCallback() {
-                @Override public void onProgress(String name) {
-                    Log.d(TAG, "⬇ " + name);
-                }
-                @Override public void onDone(int total) {
-                    runOnUiThread(() -> {
-                        if (isFinishing() || isDestroyed()) return;
-                        showProgress(false);
-                        Toast.makeText(TvMainActivity.this,
-                            "✅ " + total + " chaînes chargées", Toast.LENGTH_SHORT).show();
-                    });
-                }
-                @Override public void onError(String msg) {
-                    runOnUiThread(() -> {
-                        if (isFinishing() || isDestroyed()) return;
-                        showProgress(false);
-                        Log.w(TAG, "Download non-fatal: " + msg);
-                        Executors.newSingleThreadExecutor().execute(() -> {
-                            if (db.channelDao().count() == 0)
-                                runOnUiThread(() -> showAddPlaylistDialog());
+    /**
+     * Charge chaque DNS comme si l'utilisateur avait cliqué "Ajouter + Charger".
+     * Traitement SÉQUENTIEL : DNS 1 → DNS 2 → … → DNS N.
+     * Les chaînes apparaissent dans l'interface dès que chaque DNS est chargé
+     * (via LiveData observers dans observeAllRows).
+     */
+    private void loadDnsSequentially(String login, String password, String expires,
+                                      String[] dnsUrls, String[] epgUrls) {
+        showSyncStatus("Chargement…");
+        Executors.newSingleThreadExecutor().execute(() -> {
+            int totalLoaded = 0;
+            for (int i = 0; i < dnsUrls.length; i++) {
+                String url = dnsUrls[i].trim();
+                if (url.isEmpty()) continue;
+                String epg = i < epgUrls.length ? epgUrls[i].trim() : "";
+
+                final int idx = i + 1;
+                final int total = dnsUrls.length;
+                final String dnsUrl = url;
+
+                // Créer ou récupérer la PlaylistEntity pour ce DNS
+                PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+
+                // Feedback UI
+                runOnUiThread(() -> showSyncStatus(
+                    "📥 DNS " + idx + "/" + total + " — " + pl.name));
+
+                // Téléchargement synchrone (on est déjà dans un thread bg)
+                try {
+                    List<com.wdesign.wiseiptv.core.db.entity.ChannelEntity> channels =
+                        PlaylistLoader.loadXtreamSync(pl);
+                    if (channels != null && !channels.isEmpty()) {
+                        for (com.wdesign.wiseiptv.core.db.entity.ChannelEntity ch : channels)
+                            ch.playlistId = pl.id;
+                        final List<com.wdesign.wiseiptv.core.db.entity.ChannelEntity> fc = channels;
+                        final long fid = pl.id;
+                        db.runInTransaction(() -> {
+                            db.channelDao().deleteByPlaylist(fid);
+                            db.channelDao().insertAll(fc);
                         });
+                        db.playlistDao().updateTimestamp(pl.id, System.currentTimeMillis());
+                        totalLoaded += channels.size();
+                        Log.d(TAG, "DNS " + idx + " OK: " + channels.size() + " chaînes");
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "DNS " + idx + " erreur: " + e.getMessage());
+                    // Continue vers le DNS suivant — pas d'arrêt sur erreur
+                }
+            }
+
+            final int ft = totalLoaded;
+            runOnUiThread(() -> {
+                hideSyncStatus();
+                if (ft > 0) {
+                    Toast.makeText(this, "✅ " + ft + " chaînes chargées", Toast.LENGTH_SHORT).show();
+                } else {
+                    // Aucune chaîne → proposer ajout manuel
+                    Executors.newSingleThreadExecutor().execute(() -> {
+                        if (db.channelDao().count() == 0)
+                            runOnUiThread(() -> showAddPlaylistDialog());
                     });
                 }
             });
+        });
     }
 
-    private void showProgress(boolean show) {
-        if (progressBar != null)
-            progressBar.setVisibility(show ? View.VISIBLE : View.GONE);
+    /** Retrouve ou crée la PlaylistEntity pour un DNS donné */
+    private PlaylistEntity findOrCreatePlaylist(String login, String password,
+                                                  String dnsUrl, int idx) {
+        // Chercher par URL + login dans la DB
+        PlaylistEntity existing = db.playlistDao().findByUrlAndLogin(dnsUrl, login);
+        if (existing != null) {
+            existing.password = password;
+            existing.isActive = true;
+            db.playlistDao().update(existing);
+            return existing;
+        }
+        PlaylistEntity pl = new PlaylistEntity();
+        pl.name = "IPTV #" + idx;
+        pl.type = PlaylistEntity.TYPE_XTREAM;
+        pl.url = dnsUrl;
+        pl.username = login;
+        pl.password = password;
+        pl.isActive = true;
+        pl.lastUpdated = 0;
+        pl.id = db.playlistDao().insert(pl);
+        return pl;
     }
 
-    // ── Dialog ajout playlist ─────────────────────────────────────
+    // ── Sync manuelle (bouton 🔄) ─────────────────────────────────
+
+    private void syncNow() {
+        SharedPreferences prefs = getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE);
+        String savedDnsRaw = prefs.getString("dns_urls", "");
+        String savedLogin  = prefs.getString("login",    null);
+        String savedPass   = prefs.getString("password", "");
+        String savedExp    = prefs.getString("expires_at", "");
+
+        if (savedLogin != null && !savedDnsRaw.isEmpty()) {
+            String[] urls = savedDnsRaw.split(",");
+            String[] epgs = prefs.getString("dns_epg_urls", "").split(",");
+            loadDnsSequentially(savedLogin, savedPass, savedExp, urls, epgs);
+        } else {
+            // Pas d'activation → refresh playlists manuelles
+            showSyncStatus("Synchronisation…");
+            PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
+                @Override public void onDone(int c) {
+                    runOnUiThread(() -> { hideSyncStatus(); Toast.makeText(TvMainActivity.this,
+                        "✅ " + c + " chaînes", Toast.LENGTH_SHORT).show(); });
+                }
+                @Override public void onError(String msg) {
+                    runOnUiThread(() -> { hideSyncStatus(); Toast.makeText(TvMainActivity.this,
+                        "Aucune mise à jour disponible", Toast.LENGTH_SHORT).show(); });
+                }
+            });
+        }
+    }
+
+    // ── Dialog ajout playlist manuelle ────────────────────────────
 
     private void showAddPlaylistDialog() {
-        AlertDialog.Builder b = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog);
-        b.setTitle("Ajouter une playlist");
+        AlertDialog.Builder b = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_NoActionBar);
+        b.setTitle("➕ Ajouter une playlist");
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -469,9 +515,9 @@ public class TvMainActivity extends FragmentActivity {
         rgType.addView(rbUrl); rgType.addView(rbXt);
         layout.addView(rgType);
 
-        EditText etUrl  = new EditText(this); etUrl.setHint("URL M3U : http://...");
         EditText etName = new EditText(this); etName.setHint("Nom (optionnel)");
-        EditText etSrv  = new EditText(this); etSrv.setHint("Serveur Xtream"); etSrv.setVisibility(View.GONE);
+        EditText etUrl  = new EditText(this); etUrl.setHint("URL M3U : http://...");
+        EditText etSrv  = new EditText(this); etSrv.setHint("Serveur Xtream : http://..."); etSrv.setVisibility(View.GONE);
         EditText etUser = new EditText(this); etUser.setHint("Login Xtream");  etUser.setVisibility(View.GONE);
         EditText etPass = new EditText(this); etPass.setHint("Mot de passe");
         etPass.setInputType(android.text.InputType.TYPE_CLASS_TEXT |
@@ -489,73 +535,67 @@ public class TvMainActivity extends FragmentActivity {
             etPass.setVisibility(isXt ? View.VISIBLE : View.GONE);
         });
 
-        b.setView(layout);
-        b.setPositiveButton("Charger", (d, w) -> {
+        AlertDialog dialog = b.create();
+        dialog.setView(layout);
+        dialog.setButton(AlertDialog.BUTTON_POSITIVE, "Charger", (AlertDialog.OnClickListener) null);
+        dialog.setButton(AlertDialog.BUTTON_NEGATIVE, "Annuler", (d2, w) -> {});
+        dialog.show();
+
+        // Override du clic positif pour valider avant de fermer
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String name = etName.getText().toString().trim();
             int cid = rgType.getCheckedRadioButtonId();
             PlaylistEntity pl = new PlaylistEntity();
             pl.name = name.isEmpty() ? "Playlist" : name;
             pl.lastUpdated = 0; pl.isActive = true;
+
             if (cid == 2) {
-                pl.type = PlaylistEntity.TYPE_XTREAM;
-                pl.url = etSrv.getText().toString().trim();
+                pl.type     = PlaylistEntity.TYPE_XTREAM;
+                pl.url      = etSrv.getText().toString().trim();
                 pl.username = etUser.getText().toString().trim();
                 pl.password = etPass.getText().toString().trim();
-                if (pl.url.isEmpty() || pl.username.isEmpty()) return;
+                if (pl.url.isEmpty() || pl.username.isEmpty()) {
+                    Toast.makeText(this, "Serveur et login requis", Toast.LENGTH_SHORT).show();
+                    return;
+                }
             } else {
                 pl.type = PlaylistEntity.TYPE_M3U_URL;
                 pl.url  = etUrl.getText().toString().trim();
-                if (pl.url.isEmpty()) return;
+                if (pl.url.isEmpty()) {
+                    Toast.makeText(this, "URL requise", Toast.LENGTH_SHORT).show();
+                    return;
+                }
             }
-            showProgress(true);
+
+            dialog.dismiss();
+            showSyncStatus("Chargement de " + pl.name + "…");
+
             Executors.newSingleThreadExecutor().execute(() -> {
                 pl.id = db.playlistDao().insert(pl);
                 PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
                     @Override public void onDone(int count) {
-                        runOnUiThread(() -> {
-                            showProgress(false);
-                            Toast.makeText(TvMainActivity.this,
-                                count + " chaînes ✅", Toast.LENGTH_SHORT).show();
-                        });
+                        runOnUiThread(() -> { hideSyncStatus(); Toast.makeText(TvMainActivity.this,
+                            count + " chaînes ✅", Toast.LENGTH_SHORT).show(); });
                     }
                     @Override public void onError(String msg) {
-                        runOnUiThread(() -> {
-                            showProgress(false);
-                            Toast.makeText(TvMainActivity.this,
-                                "Erreur : " + msg, Toast.LENGTH_LONG).show();
-                        });
+                        runOnUiThread(() -> { hideSyncStatus(); Toast.makeText(TvMainActivity.this,
+                            "Erreur : " + msg, Toast.LENGTH_LONG).show(); });
                     }
                 });
             });
         });
-        b.setNegativeButton("Annuler", null);
-        b.show();
     }
 
-    // ── Sync manuelle ─────────────────────────────────────────────
+    // ── Statut sync ───────────────────────────────────────────────
 
-    private void syncNow() {
-        SharedPreferences prefs = getSharedPreferences("wise_activation_tv", Context.MODE_PRIVATE);
-        String savedDnsRaw = prefs.getString("dns_urls", "");
-        String savedLogin  = prefs.getString("login",    null);
-        String savedPass   = prefs.getString("password", "");
-        String savedExp    = prefs.getString("expires_at", "");
-        if (savedLogin != null && !savedDnsRaw.isEmpty()) {
-            String[] urls = savedDnsRaw.split(",");
-            String[] epgs = prefs.getString("dns_epg_urls", "").split(",");
-            List<DeviceSecurity.DnsEntry> entries = new ArrayList<>();
-            for (int i = 0; i < urls.length; i++) {
-                if (urls[i].trim().isEmpty()) continue;
-                entries.add(new DeviceSecurity.DnsEntry(urls[i].trim(),
-                    i < epgs.length ? epgs[i].trim() : "", i));
-            }
-            if (!entries.isEmpty()) {
-                launchDownload(new DeviceSecurity.ActivationResult(
-                    DeviceSecurity.getOrCreateKey(this), savedLogin, savedPass, savedExp, entries));
-                return;
-            }
-        }
-        Toast.makeText(this, "Aucun abonnement actif", Toast.LENGTH_SHORT).show();
+    private void showSyncStatus(String msg) {
+        if (tvSyncStatus != null) { tvSyncStatus.setText(msg); tvSyncStatus.setVisibility(View.VISIBLE); }
+        if (progressBar != null) progressBar.setVisibility(View.VISIBLE);
+    }
+
+    private void hideSyncStatus() {
+        if (tvSyncStatus != null) tvSyncStatus.setVisibility(View.GONE);
+        if (progressBar != null) progressBar.setVisibility(View.GONE);
     }
 
     // ── Player ────────────────────────────────────────────────────
