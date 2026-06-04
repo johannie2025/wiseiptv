@@ -271,12 +271,36 @@ public class ActivationActivity extends AppCompatActivity {
         } catch (Exception e) { return false; }
     }
 
-    private void saveCache(DeviceSecurity.ActivationResult r) {
-        getPrefs().edit()
-            .putString("status", "ACTIVE")
-            .putString("expires_at", r.expiresAt)
-            .putString("login", r.login)
-            .apply();
+   private void saveCache(DeviceSecurity.ActivationResult r) {
+        if (r == null) return;
+        
+        SharedPreferences.Editor ed = getPrefs().edit()
+            .putString("status",     "ACTIVE")
+            .putString("expires_at", r.expiresAt != null ? r.expiresAt : "")
+            .putString("login",      r.login != null ? r.login : "")
+            .putString("password",   r.password != null ? r.password : "");
+
+        // Sauvegarder les DNS sérialisés sous forme de CSV (Comma-Separated Values)
+        // Permet à MainActivity.startBackgroundSync() (Chemin 2) de reconstruire 
+        // la file d'attente réseau après un reboot, un crash ou une rotation d'écran.
+        if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
+            StringBuilder urls = new StringBuilder();
+            StringBuilder epgs = new StringBuilder();
+            for (int i = 0; i < r.dnsServers.size(); i++) {
+                DeviceSecurity.DnsEntry entry = r.dnsServers.get(i);
+                if (entry == null || entry.url == null) continue;
+                
+                if (urls.length() > 0) { 
+                    urls.append(","); 
+                    epgs.append(","); 
+                }
+                urls.append(entry.url.trim());
+                epgs.append(entry.epgUrl != null ? entry.epgUrl.trim() : "");
+            }
+            ed.putString("dns_urls",     urls.toString())
+              .putString("dns_epg_urls", epgs.toString());
+        }
+        ed.apply();
     }
 
     private void clearCache(String status) {
@@ -284,9 +308,13 @@ public class ActivationActivity extends AppCompatActivity {
             .putString("status", status)
             .remove("expires_at")
             .remove("login")
+            .remove("password")
+            .remove("dns_urls")
+            .remove("dns_epg_urls")
+            .remove("last_sync_ts")
             .apply();
     }
-
+	
     private SharedPreferences getPrefs() {
         return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
