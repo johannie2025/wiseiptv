@@ -1,234 +1,280 @@
-package com.wdesign.wiseiptv.mobile.util;
+package com.wdesign.wiseiptv.mobile.ui;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
-import android.util.Log;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.*;
+import androidx.appcompat.app.AppCompatActivity;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
-import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
-import java.util.ArrayList;
-import java.util.List;
+import com.wdesign.wiseiptv.mobile.R;
+import com.wdesign.wiseiptv.mobile.util.ActivationManager;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 /**
- * ActivationManager — Gère la création/mise à jour des configurations de playlists depuis le serveur.
+ * ActivationActivity — PREMIER ÉCRAN, seulement si nécessaire.
  */
-public class ActivationManager {
+public class ActivationActivity extends AppCompatActivity {
 
-    private static final String TAG   = "ActivationManager";
     private static final String PREFS = "wise_activation";
 
-    // ── Interfaces ────────────────────────────────────────────────
+    private TextView    tvDeviceKey, tvStatus, tvStatusDetail;
+    private TextView    tvProviderLabel, tvLogin, tvPassword, tvExpiry;
+    private View        cardProvider;
+    private Button      btnCheck, btnAccess, btnCopy;
+    private ProgressBar progressBar;
 
-    public interface OnResult {
-        void onActivated(DeviceSecurity.ActivationResult r);
-        void onExpired(String status);
-        void onError(String msg);
-    }
+    // FIX : empêche deux check() simultanés
+    private boolean isCheckInProgress = false;
 
-    @Deprecated
-    public interface OnDownloadCallback {
-        void onSuccess();
-        void onFailure(String msg);
-    }
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
-    /** Suivi de la synchronisation des configurations de serveurs */
-    public interface DownloadCallback {
-        void onProgress(String playlistName);
-        void onDone(int totalPlaylists); // Clarifié : Renvoie le nombre de configurations synchronisées
-        void onError(String msg);
-    }
+        // Décision instantanée : cache valide → aller directement à MainActivity
+        if (isActiveAndNotExpired()) {
+            goToMain();
+            return;
+        }
 
-    // ── checkAndSync (background, depuis l'application) ───────────────
+        setContentView(R.layout.activity_activation);
 
-    public static void checkAndSync(Context ctx, OnResult cb) {
-        // Utiliser le Context applicatif global pour écarter tout risque de fuite de mémoire d'UI
-        final Context appCtx = ctx.getApplicationContext();
-        AppDatabase db = AppDatabase.get(appCtx);
-        
-        // Un thread léger à la volée évite l'accumulation d'instances d'Executors non fermées
-        new Thread(() -> 
-            DeviceSecurity.check(appCtx, new DeviceSecurity.Callback() {
-                @Override
-                public void onActive(DeviceSecurity.ActivationResult r) {
-                    saveStatusPrefs(appCtx, "ACTIVE", r.expiresAt, r.login);
-                    
-                    // Mise à jour silencieuse des profils de serveurs en arrière-plan
-                    upsertAndDownloadAll(appCtx, db, r, new DownloadCallback() {
-                        @Override public void onProgress(String n) {}
-                        @Override public void onDone(int totalPlaylists) {
-                            Log.d(TAG, "Background configuration sync OK. " + totalPlaylists + " serveurs configurés.");
-                        }
-                        @Override public void onError(String m) {
-                            Log.w(TAG, "Background configuration sync error: " + m);
-                        }
-                    });
-                    if (cb != null) cb.onActivated(r);
-                }
-                
-                @Override
-                public void onInactive(String status, String message) {
-                    purgeActivationPlaylists(appCtx, db);
-                    saveStatusPrefs(appCtx, status, "", "");
-                    if (cb != null) cb.onExpired(status + ": " + message);
-                }
-                
-                @Override
-                public void onError(String message) {
-                    if (cb != null) cb.onError(message);
-                }
-            })
-        ).start();
-    }
+        tvDeviceKey     = findViewById(R.id.tv_device_key);
+        tvStatus        = findViewById(R.id.tv_status);
+        tvStatusDetail  = findViewById(R.id.tv_status_detail);
+        tvProviderLabel = findViewById(R.id.tv_provider_label);
+        tvLogin         = findViewById(R.id.tv_login);
+        tvPassword      = findViewById(R.id.tv_password);
+        tvExpiry        = findViewById(R.id.tv_expiry);
+        cardProvider    = findViewById(R.id.card_provider);
+        btnCheck        = findViewById(R.id.btn_check);
+        btnAccess       = findViewById(R.id.btn_access);
+        btnCopy         = findViewById(R.id.btn_copy_key);
+        progressBar     = findViewById(R.id.progress_bar);
 
-    // ── upsertAndDownloadAll — Crée ou met à jour les entités DNS ───
+        String key = DeviceSecurity.getOrCreateKey(this);
+        tvDeviceKey.setText(key);
 
-    public static void upsertAndDownloadAll(Context ctx, AppDatabase db,
-                                            DeviceSecurity.ActivationResult r,
-                                            DownloadCallback cb) {
-        final Context appCtx = ctx.getApplicationContext();
-        
-        new Thread(() -> {
-            SharedPreferences prefs = appCtx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        btnCopy.setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
+            Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
+        });
 
-            String savedIds = prefs.getString("playlist_ids", "");
-            List<Long> existingIds = parseLongs(savedIds);
+        // Vérification manuelle : affiche l'état, ne télécharge pas
+        btnCheck.setOnClickListener(v -> checkActivation(false));
 
-            List<Long> newIds = new ArrayList<>();
-            int dnsCount = r.dnsServers != null ? r.dnsServers.size() : 0;
-
-            if (dnsCount == 0) {
-                if (cb != null) cb.onError("Aucun serveur de flux reçu");
-                return;
+        // Accès : vérifie + télécharge + ouvre MainActivity
+        btnAccess.setOnClickListener(v -> {
+            String saved = getPrefs().getString("status", "");
+            if ("ACTIVE".equals(saved) && !isCheckInProgress) {
+                // On a déjà un résultat actif → télécharger directement
+                startDownloadAndGo();
+            } else if (!isCheckInProgress) {
+                // Pas encore vérifié → vérifier d'abord puis télécharger
+                checkActivation(true);
             }
+        });
 
-            try {
-                // SÉCURISATION : Toute la manipulation BDD est exécutée de façon atomique
-                db.runInTransaction(() -> {
-                    for (int i = 0; i < dnsCount; i++) {
-                        DeviceSecurity.DnsEntry dns = r.dnsServers.get(i);
-                        if (dns.url == null || dns.url.isEmpty()) continue;
+        // Afficher état expiré/désactivé s'il est en cache
+        String saved = getPrefs().getString("status", "");
+        if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) {
+            showInactive(saved);
+        }
 
-                        long existingId = i < existingIds.size() ? existingIds.get(i) : 0;
-                        PlaylistEntity pl = existingId > 0 ? db.playlistDao().findById(existingId) : null;
-                        if (pl == null) pl = new PlaylistEntity();
+        // Vérification réseau silencieuse au démarrage (affichage seulement, pas de DL)
+        checkActivation(false);
+    }
 
-                        String urlBasse = dns.url.toLowerCase().trim();
-                        if (urlBasse.endsWith(".m3u") || urlBasse.endsWith(".m3u8") || urlBasse.contains("m3u")) {
-                            pl.type = PlaylistEntity.TYPE_M3U_URL;
-                            pl.name = "Playlist M3U #" + (i + 1);
-                        } else {
-                            pl.type = PlaylistEntity.TYPE_XTREAM;
-                            pl.name = dnsCount == 1 ? "Abonnement IPTV" : "IPTV #" + (i + 1);
-                        }
+    // ── Vérification ───────────────────────────────────────────────
 
-                        pl.url = dns.url;
-                        pl.username = r.login;
-                        pl.password = r.password;
-                        pl.isActive = true;
-                        pl.lastUpdated = 0; // Confirme le passage de témoin à MainActivity pour le téléchargement réel
+    private void checkActivation(boolean goOnSuccess) {
+        if (isCheckInProgress) return;
+        isCheckInProgress = true;
+        setLoading(true);
 
-                        if (pl.id == 0) {
-                            pl.id = db.playlistDao().insert(pl);
-                        } else {
-                            db.playlistDao().update(pl);
-                        }
-                        newIds.add(pl.id);
-
-                        if (cb != null) cb.onProgress(pl.name);
-                    }
-
-                    // Nettoyer proprement les serveurs qui ont été révoqués côté API admin
-                    for (long oldId : existingIds) {
-                        if (!newIds.contains(oldId)) {
-                            db.channelDao().deleteByPlaylist(oldId);
-                            PlaylistEntity old = db.playlistDao().findById(oldId);
-                            if (old != null) db.playlistDao().delete(old);
-                        }
+        DeviceSecurity.check(this, new DeviceSecurity.Callback() {
+            @Override
+            public void onActive(DeviceSecurity.ActivationResult r) {
+                saveCache(r);
+                runOnUiThread(() -> {
+                    isCheckInProgress = false;
+                    if (isFinishing() || isDestroyed()) return;
+                    setLoading(false);
+                    if (goOnSuccess) {
+                        startDownloadAndGo(r);
+                    } else {
+                        showActive(r);
                     }
                 });
-
-                // Les préférences persistantes ne sont mises à jour que si la transaction BDD réussit
-                prefs.edit().putString("playlist_ids", joinLongs(newIds)).apply();
-
-                if (cb != null) cb.onDone(newIds.size());
-
-            } catch (Exception e) {
-                Log.e(TAG, "Erreur lors de la transaction d'enregistrement des DNS", e);
-                if (cb != null) cb.onError("Erreur d'écriture BDD : " + e.getLocalizedMessage());
             }
-        }).start();
-    }
 
-    public static void upsertActivationPlaylist(Context ctx, AppDatabase db,
-                                                 DeviceSecurity.ActivationResult r) {
-        upsertAndDownloadAll(ctx, db, r, new DownloadCallback() {
-            @Override public void onProgress(String n) {}
-            @Override public void onDone(int t) {}
-            @Override public void onError(String m) {}
-        });
-    }
+            @Override
+            public void onInactive(String status, String message) {
+                clearCache(status);
+                runOnUiThread(() -> {
+                    isCheckInProgress = false;
+                    if (isFinishing() || isDestroyed()) return;
+                    setLoading(false);
+                    showInactive(status);
+                });
+            }
 
-    // ── Purge (expiration/désactivation) ──────────────────────────
-
-    private static void purgeActivationPlaylists(Context ctx, AppDatabase db) {
-        SharedPreferences prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        List<Long> ids = parseLongs(prefs.getString("playlist_ids", ""));
-        
-        db.runInTransaction(() -> {
-            for (long id : ids) {
-                db.channelDao().deleteByPlaylist(id);
-                PlaylistEntity pl = db.playlistDao().findById(id);
-                if (pl != null) db.playlistDao().delete(pl);
+            @Override
+            public void onError(String message) {
+                runOnUiThread(() -> {
+                    isCheckInProgress = false;
+                    if (isFinishing() || isDestroyed()) return;
+                    setLoading(false);
+                    if (isActiveAndNotExpired()) showOffline();
+                    else showPending(message);
+                });
             }
         });
-        
-        prefs.edit().remove("playlist_ids").apply();
     }
 
-    // ── Prefs ─────────────────────────────────────────────────────
+    // ── Téléchargement + navigation corrigés (Style Android TV) ──────────────────
 
-    private static void saveStatusPrefs(Context ctx, String status, String expires, String login) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString("status", status)
-            .putString("expires_at", expires)
-            .putString("login", login)
+    private void startDownloadAndGo() {
+        if (isFinishing() || isDestroyed()) return;
+        
+        SharedPreferences p = getPrefs();
+        String login = p.getString("login", "");
+        
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.putExtra(MainActivity.EXTRA_ACT_LOGIN, login);
+        
+        startActivity(intent);
+        finish();
+    }
+
+    private void startDownloadAndGo(DeviceSecurity.ActivationResult r) {
+        if (isFinishing() || isDestroyed()) return;
+
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login);
+        intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password);
+        intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt);
+        
+        if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
+            String[] urls    = new String[r.dnsServers.size()];
+            String[] epgUrls = new String[r.dnsServers.size()];
+            for (int i = 0; i < r.dnsServers.size(); i++) {
+                urls[i]    = r.dnsServers.get(i).url;
+                epgUrls[i] = r.dnsServers.get(i).epgUrl != null ? r.dnsServers.get(i).epgUrl : "";
+            }
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     urls);
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
+        }
+        
+        startActivity(intent);
+        finish();
+    }
+
+    // ── Affichage état ──────────────────────────────────────────────
+
+    private void showActive(DeviceSecurity.ActivationResult r) {
+        tvStatus.setText("✅ ACTIVÉ");
+        tvStatus.setTextColor(0xFF4CAF50);
+        tvStatusDetail.setText("Votre abonnement est actif");
+        cardProvider.setVisibility(View.VISIBLE);
+        tvLogin.setText("Login : " + r.login);
+        tvPassword.setText("Mot de passe : " + r.password);
+        tvExpiry.setText("Expire le : " + r.expiresAt);
+        if (r.dnsServers != null && !r.dnsServers.isEmpty())
+            tvProviderLabel.setText("Provider : " + r.dnsServers.get(0).url);
+        btnAccess.setVisibility(View.VISIBLE);
+        btnAccess.setEnabled(true);
+        btnAccess.setText("▶ Accéder au contenu");
+    }
+
+    private void showInactive(String status) {
+        cardProvider.setVisibility(View.GONE);
+        btnAccess.setVisibility(View.GONE);
+        if (status.contains("EXPIRED")) {
+            tvStatus.setText("⏰ EXPIRÉ");
+            tvStatus.setTextColor(0xFFFF9800);
+            tvStatusDetail.setText("Abonnement expiré.\nContactez votre revendeur pour renouveler.");
+        } else if (status.contains("DISABLED")) {
+            tvStatus.setText("🚫 DÉSACTIVÉ");
+            tvStatus.setTextColor(0xFFF44336);
+            tvStatusDetail.setText("Accès suspendu.\nContactez votre revendeur.");
+        } else {
+            tvStatus.setText("❌ NON ACTIVÉ");
+            tvStatus.setTextColor(0xFFF44336);
+            tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur pour activation.");
+        }
+    }
+
+    private void showPending(String err) {
+        cardProvider.setVisibility(View.GONE);
+        btnAccess.setVisibility(View.GONE);
+        tvStatus.setText("⏳ EN ATTENTE");
+        tvStatus.setTextColor(0xFFFFEB3B);
+        tvStatusDetail.setText("Communiquez votre Device Key à votre revendeur.\n(" + err + ")");
+    }
+
+    private void showOffline() {
+        tvStatus.setText("📡 HORS LIGNE");
+        tvStatus.setTextColor(0xFF9E9E9E);
+        tvStatusDetail.setText("Pas de connexion. Accès via le cache.");
+        btnAccess.setVisibility(View.VISIBLE);
+        btnAccess.setEnabled(true);
+        btnAccess.setText("▶ Continuer hors ligne");
+        btnAccess.setOnClickListener(v -> goToMain());
+    }
+
+    // ── Cache ───────────────────────────────────────────────────────
+
+    private boolean isActiveAndNotExpired() {
+        SharedPreferences p = getPrefs();
+        if (!"ACTIVE".equals(p.getString("status", ""))) return false;
+        String exp = p.getString("expires_at", "");
+        if (exp.isEmpty()) return false;
+        try {
+            Date expDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).parse(exp);
+            return expDate != null && new Date().before(expDate);
+        } catch (Exception e) { return false; }
+    }
+
+    private void saveCache(DeviceSecurity.ActivationResult r) {
+        getPrefs().edit()
+            .putString("status", "ACTIVE")
+            .putString("expires_at", r.expiresAt)
+            .putString("login", r.login)
             .apply();
     }
 
-    public static String getSavedStatus(Context ctx) {
-        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString("status", "UNKNOWN");
+    private void clearCache(String status) {
+        getPrefs().edit()
+            .putString("status", status)
+            .remove("expires_at")
+            .remove("login")
+            .apply();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────
-
-    private static List<Long> parseLongs(String csv) {
-        List<Long> result = new ArrayList<>();
-        if (csv == null || csv.isEmpty()) return result;
-        for (String s : csv.split(",")) {
-            try { result.add(Long.parseLong(s.trim())); } catch (NumberFormatException ignored) {}
-        }
-        return result;
+    private SharedPreferences getPrefs() {
+        return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    private static String joinLongs(List<Long> list) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < list.size(); i++) {
-            if (i > 0) sb.append(",");
-            sb.append(list.get(i));
-        }
-        return sb.toString();
+    // ── Navigation ──────────────────────────────────────────────────
+
+    private void goToMain() {
+        if (isFinishing() || isDestroyed()) return;
+        startActivity(new Intent(this, MainActivity.class));
+        finish();
     }
 
-    public static void downloadAllPlaylistsAsync(
-            Context ctx,
-            AppDatabase db,
-            DeviceSecurity.ActivationResult r,
-            OnDownloadCallback cb) {
-        upsertAndDownloadAll(ctx, db, r, new DownloadCallback() {
-            @Override public void onProgress(String name) {}
-            @Override public void onDone(int total) { if (cb != null) cb.onSuccess(); }
-            @Override public void onError(String msg) { if (cb != null) cb.onFailure(msg); }
-        });
+    private void setLoading(boolean on) {
+        if (progressBar == null || btnCheck == null) return;
+        progressBar.setVisibility(on ? View.VISIBLE : View.GONE);
+        btnCheck.setEnabled(!on);
+        btnCheck.setText(on ? "Vérification…" : "🔄 Vérifier l'activation");
     }
-}
+} // ── UNE SEULE ACCOLADE FINALE ICI POUR FERMER LA CLASSE
