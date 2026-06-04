@@ -16,17 +16,16 @@ import java.util.Date;
 import java.util.Locale;
 
 /**
- * ActivationActivity — PREMIER ÉCRAN, seulement si nécessaire.
+ * ActivationActivity — adapté de TvActivationActivity (version stable).
  *
- * Flux :
- *  1. Cache valide (ACTIVE + non expiré) → goToMainFromCache() directement
- *  2. btnCheck → checkActivation(false)  : affiche l'état seulement
- *  3. btnAccess → cache ACTIVE           : startDownloadAndGo() depuis prefs
- *               → pas encore vérifié    : checkActivation(true) → startDownloadAndGo(r)
- *  4. Hors-ligne + cache valide          : goToMainFromCache() (pas de DL)
+ * Flux identique à la TV :
+ *  1. Cache valide → goToMain(false, null) directement
+ *  2. btnCheck    → checkActivation(false) : affiche seulement
+ *  3. btnAccess   → checkActivation(true)  : vérifie + navigue avec résultat frais
+ *  4. Hors-ligne  → goToMain(false, null)  : cache uniquement
  *
+ * goToMain() passe TOUJOURS les extras complets à MainActivity.
  * saveCache() stocke : status, expires_at, login, password, dns_urls, dns_epg_urls
- * MainActivity reçoit tous ces extras pour construire les PlaylistEntity.
  */
 public class ActivationActivity extends AppCompatActivity {
 
@@ -44,9 +43,8 @@ public class ActivationActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Cache valide → MainActivity directement, sans passer par l'UI
         if (isActiveAndNotExpired()) {
-            goToMainFromCache();
+            goToMain(false, null);
             return;
         }
 
@@ -74,28 +72,13 @@ public class ActivationActivity extends AppCompatActivity {
             Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
         });
 
-        // Vérification manuelle : affiche l'état uniquement, ne navigue pas
         btnCheck.setOnClickListener(v -> checkActivation(false));
+        // Identique à TV : btnAccess déclenche toujours checkActivation(true)
+        btnAccess.setOnClickListener(v -> checkActivation(true));
 
-        // Accès : cache ACTIVE → passe les credentials depuis prefs
-        //         sinon → vérifie réseau puis navigue avec résultat frais
-        btnAccess.setOnClickListener(v -> {
-            if (isCheckInProgress) return;
-            String saved = getPrefs().getString("status", "");
-            if ("ACTIVE".equals(saved)) {
-                goToMainFromCache();
-            } else {
-                checkActivation(true);
-            }
-        });
-
-        // Afficher état expiré/désactivé depuis cache
         String saved = getPrefs().getString("status", "");
-        if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) {
-            showInactive(saved);
-        }
+        if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) showInactive(saved);
 
-        // Vérification réseau silencieuse au démarrage (affichage seulement)
         checkActivation(false);
     }
 
@@ -109,13 +92,13 @@ public class ActivationActivity extends AppCompatActivity {
         DeviceSecurity.check(this, new DeviceSecurity.Callback() {
             @Override
             public void onActive(DeviceSecurity.ActivationResult r) {
-                saveCache(r); // stocke login + password + dns_urls + dns_epg_urls
+                saveCache(r);
                 runOnUiThread(() -> {
                     isCheckInProgress = false;
                     if (isFinishing() || isDestroyed()) return;
                     setLoading(false);
                     if (goOnSuccess) {
-                        startDownloadAndGo(r); // résultat frais → extras complets
+                        goToMain(true, r); // résultat frais → extras complets
                     } else {
                         showActive(r);
                     }
@@ -146,53 +129,48 @@ public class ActivationActivity extends AppCompatActivity {
         });
     }
 
-    // ── Navigation ─────────────────────────────────────────────────
+    // ── Navigation — identique à TvActivationActivity.goToMain() ───
 
     /**
-     * Navigation avec résultat frais (après vérification réseau réussie).
-     * Tous les extras sont présents → MainActivity télécharge les playlists.
+     * @param animate  true = transition normale, false = sans animation (retour cache)
+     * @param r        résultat frais (null = navigation depuis cache)
      */
-    private void startDownloadAndGo(DeviceSecurity.ActivationResult r) {
+    private void goToMain(boolean animate, DeviceSecurity.ActivationResult r) {
         if (isFinishing() || isDestroyed()) return;
         Intent intent = new Intent(this, MainActivity.class);
-        intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login    != null ? r.login    : "");
-        intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password != null ? r.password : "");
-        intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt != null ? r.expiresAt : "");
-        if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
-            String[] urls    = new String[r.dnsServers.size()];
-            String[] epgUrls = new String[r.dnsServers.size()];
-            for (int i = 0; i < r.dnsServers.size(); i++) {
-                urls[i]    = r.dnsServers.get(i).url;
-                epgUrls[i] = r.dnsServers.get(i).epgUrl != null
-                             ? r.dnsServers.get(i).epgUrl : "";
+
+        if (r != null) {
+            // Résultat frais : extras complets depuis le serveur
+            intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login    != null ? r.login    : "");
+            intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password != null ? r.password : "");
+            intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt != null ? r.expiresAt : "");
+            if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
+                String[] urls    = new String[r.dnsServers.size()];
+                String[] epgUrls = new String[r.dnsServers.size()];
+                for (int i = 0; i < r.dnsServers.size(); i++) {
+                    urls[i]    = r.dnsServers.get(i).url;
+                    epgUrls[i] = r.dnsServers.get(i).epgUrl != null
+                                 ? r.dnsServers.get(i).epgUrl : "";
+                }
+                intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     urls);
+                intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
             }
-            intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     urls);
-            intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
+        } else {
+            // Cache : reconstruire les extras depuis SharedPreferences
+            SharedPreferences p = getPrefs();
+            intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    p.getString("login",      ""));
+            intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, p.getString("password",   ""));
+            intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  p.getString("expires_at", ""));
+            String dnsRaw = p.getString("dns_urls",     "");
+            String epgRaw = p.getString("dns_epg_urls", "");
+            if (!dnsRaw.isEmpty()) {
+                intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     dnsRaw.split(","));
+                intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgRaw.split(","));
+            }
         }
-        startActivity(intent);
-        finish();
-    }
 
-    /**
-     * Navigation depuis le cache SharedPreferences.
-     * Utilisé quand : cache valide au démarrage, btnAccess sur ACTIVE en cache,
-     * ou mode hors-ligne.
-     * MainActivity recevra les extras et fera un refresh stale si nécessaire.
-     */
-    private void goToMainFromCache() {
-        if (isFinishing() || isDestroyed()) return;
-        SharedPreferences p = getPrefs();
-        Intent intent = new Intent(this, MainActivity.class);
-        intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    p.getString("login",      ""));
-        intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, p.getString("password",   ""));
-        intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  p.getString("expires_at", ""));
-        String dnsRaw = p.getString("dns_urls",     "");
-        String epgRaw = p.getString("dns_epg_urls", "");
-        if (!dnsRaw.isEmpty()) {
-            intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     dnsRaw.split(","));
-            intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgRaw.split(","));
-        }
         startActivity(intent);
+        if (!animate) overridePendingTransition(0, 0);
         finish();
     }
 
@@ -246,15 +224,11 @@ public class ActivationActivity extends AppCompatActivity {
         btnAccess.setVisibility(View.VISIBLE);
         btnAccess.setEnabled(true);
         btnAccess.setText("▶ Continuer hors ligne");
-        // Hors-ligne → cache uniquement, pas de téléchargement
-        btnAccess.setOnClickListener(v -> goToMainFromCache());
+        btnAccess.setOnClickListener(v -> goToMain(false, null));
     }
 
     // ── Cache ───────────────────────────────────────────────────────
 
-    /**
-     * Vérifie si le cache local indique un abonnement ACTIVE non expiré.
-     */
     private boolean isActiveAndNotExpired() {
         SharedPreferences p = getPrefs();
         if (!"ACTIVE".equals(p.getString("status", ""))) return false;
@@ -266,10 +240,6 @@ public class ActivationActivity extends AppCompatActivity {
         } catch (Exception e) { return false; }
     }
 
-    /**
-     * Sauvegarde TOUS les champs nécessaires à goToMainFromCache() :
-     * login, password, expires_at, dns_urls (CSV), dns_epg_urls (CSV).
-     */
     private void saveCache(DeviceSecurity.ActivationResult r) {
         if (r == null) return;
         SharedPreferences.Editor ed = getPrefs().edit()
@@ -292,17 +262,11 @@ public class ActivationActivity extends AppCompatActivity {
         ed.apply();
     }
 
-    /**
-     * Efface tous les credentials du cache et enregistre le nouveau statut.
-     */
     private void clearCache(String status) {
         getPrefs().edit()
             .putString("status", status)
-            .remove("expires_at")
-            .remove("login")
-            .remove("password")
-            .remove("dns_urls")
-            .remove("dns_epg_urls")
+            .remove("expires_at").remove("login").remove("password")
+            .remove("dns_urls").remove("dns_epg_urls")
             .apply();
     }
 
