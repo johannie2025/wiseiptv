@@ -82,28 +82,31 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
           script: |
-              adb logcat -c
-              adb logcat *:E AndroidRuntime:E > /tmp/logcat.txt &
-              
-              ./gradlew :mobile:connectedDebugAndroidTest \
-                --info \
-                --stacktrace \
-                2>&1 | tee /tmp/test-output.txt || true
-              
-              echo "=== LOGCAT CRASH (dernières 100 lignes) ==="
-              tail -100 /tmp/logcat.txt
-
-      - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ github.ref_name }}
-          path: |
-            mobile/build/reports/androidTests/
-            /tmp/logcat.txt
-            /tmp/test-output.txt
-          retention-days: 14
-          if-no-files-found: warn
+            # 1. Nettoyer les anciens logs de l'émulateur
+            adb logcat -c
+            
+            # 2. Capturer TOUS les logs en tâche de fond de manière brute (sans filtre restrictif)
+            # On utilise l'option -b all pour inclure le kernel, system et main
+            adb logcat -b all > /tmp/logcat.txt &
+            LOGCAT_PID=$!
+            
+            # 3. Lancer les tests instrumentés
+            ./gradlew :mobile:connectedDebugAndroidTest \
+              --info \
+              --stacktrace \
+              2>&1 | tee /tmp/test-output.txt || true
+            
+            # 4. Forcer l'écriture des buffers de logs restants et tuer le processus logcat proprement
+            sleep 2
+            kill $LOGCAT_PID || true
+            
+            # 5. Affichage intelligent dans la console de GitHub Actions :
+            # On cherche d'abord s'il y a une trace de "FATAL EXCEPTION", de crash Room, ou d'erreurs liées à wdesign
+            echo "=== ANALYSE DES ERREURS DE L'APPLICATION ==="
+            grep -i -C 5 -E "fatal|exception|crash|wdesign|room" /tmp/logcat.txt || true
+            
+            echo "=== DERNIÈRES 150 LIGNES DU LOGCAT COMPLET ==="
+            tail -150 /tmp/logcat.txt
 
       - name: Build Release APK
         if: env.KEYSTORE_BASE64 != ''
