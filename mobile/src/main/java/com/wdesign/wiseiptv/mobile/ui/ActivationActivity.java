@@ -248,34 +248,36 @@ private void goToMain(DeviceSecurity.ActivationResult r) {
         } catch (Exception e) { return false; }
     }
 
-  private void saveCache(DeviceSecurity.ActivationResult r) {
-    if (r == null) return;
-    SharedPreferences.Editor ed = getPrefs().edit()
-        .putString("status",     "ACTIVE")
-        .putString("expires_at", r.expiresAt != null ? r.expiresAt : "")
-        .putString("login",      r.login     != null ? r.login     : "")
-        .putString("password",   r.password  != null ? r.password  : "");
+    private void saveCache(DeviceSecurity.ActivationResult r) {
+        if (r == null) return;
+        SharedPreferences.Editor ed = getPrefs().edit()
+            .putString("status",     "ACTIVE")
+            .putString("expires_at", r.expiresAt != null ? r.expiresAt : "")
+            .putString("login",      r.login     != null ? r.login     : "")
+            .putString("password",   r.password  != null ? r.password  : "");
 
-    if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
-        StringBuilder urls = new StringBuilder();
-        StringBuilder epgs = new StringBuilder();
-        for (int i = 0; i < r.dnsServers.size(); i++) {
-            if (i > 0) { urls.append(","); epgs.append(","); }
-            
-            // === CORRECTION ICI (NPE évitée) ===
-            DeviceSecurity.DnsEntry entry = r.dnsServers.get(i);
-            String url = (entry != null && entry.url != null) ? entry.url : "";
-            String epg = (entry != null && entry.epgUrl != null) ? entry.epgUrl : "";
-            
-            urls.append(url);
-            epgs.append(epg);
+        if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
+            StringBuilder urls = new StringBuilder();
+            StringBuilder epgs = new StringBuilder();
+            for (int i = 0; i < r.dnsServers.size(); i++) {
+                if (i > 0) { 
+                    urls.append(","); 
+                    epgs.append(","); 
+                }
+                
+                // === CORRECTION CRITIQUE (alignée avec TV) ===
+                DeviceSecurity.DnsEntry entry = r.dnsServers.get(i);
+                String url = (entry != null && entry.url != null) ? entry.url : "";
+                String epg = (entry != null && entry.epgUrl != null) ? entry.epgUrl : "";
+                
+                urls.append(url);
+                epgs.append(epg);
+            }
+            ed.putString("dns_urls",     urls.toString())
+              .putString("dns_epg_urls", epgs.toString());
         }
-        ed.putString("dns_urls",     urls.toString())
-          .putString("dns_epg_urls", epgs.toString());
+        ed.apply();
     }
-    ed.apply();
-}
-
     private void clearCache(String status) {
         getPrefs().edit()
             .putString("status", status)

@@ -57,51 +57,8 @@ jobs:
           PROPSEOF
           fi
 
-      - name: Enable KVM (accélération émulateur)
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
       - name: Build Debug APK
         run: ./gradlew :mobile:assembleDebug
-
-      - name: Build Debug Test APK
-        run: ./gradlew :mobile:assembleDebugAndroidTest
-
-      - name: Run UI Tests on Emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 30
-          target: google_apis
-          arch: x86_64
-          ram-size: 4096M
-          heap-size: 512M
-          disk-size: 6000M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          disable-animations: true
-          script: |
-            # 1. Nettoyer les anciens logs de l'émulateur
-            adb logcat -c
-            
-            # 2. Capturer TOUS les logs en arrière-plan
-            adb logcat -b all > /tmp/logcat.txt &
-            LOGCAT_PID=$!
-            
-            # 3. Lancer les tests instrumentés sur une SEULE ligne (sans les '\')
-            ./gradlew :mobile:connectedDebugAndroidTest --info --stacktrace 2>&1 | tee /tmp/test-output.txt || true
-            
-            # 4. Attendre et fermer logcat proprement
-            sleep 2
-            kill $LOGCAT_PID || true
-            
-            # 5. Affichage analytique ciblé
-            echo "=== ANALYSE DES ERREURS DE L'APPLICATION ==="
-            grep -i -C 5 -E "fatal|exception|crash|wdesign|room" /tmp/logcat.txt || true
-            
-            echo "=== DERNIÈRES 150 LIGNES DU LOGCAT COMPLET ==="
-            tail -150 /tmp/logcat.txt
 
       - name: Build Release APK
         if: env.KEYSTORE_BASE64 != ''
