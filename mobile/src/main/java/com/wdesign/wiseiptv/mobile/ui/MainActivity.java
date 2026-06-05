@@ -97,8 +97,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         long lastSync   = prefs.getLong("last_weekly_sync_timestamp", 0);
         long oneWeekMs  = 7L * 24 * 60 * 60 * 1000;
 
-        if (System.currentTimeMillis() - lastSync < oneWeekMs) {
-            Log.d(TAG, "Sync ignoré : dernière sync < 1 semaine");
+        // Forcer la sync si la DB est vide (premier lancement / après purge)
+        // même si la sync hebdo n'est pas encore échue
+        boolean dbIsEmpty = false;
+        try { dbIsEmpty = (db.channelDao().count() == 0); } catch (Exception ignored) {}
+
+        if (!dbIsEmpty && System.currentTimeMillis() - lastSync < oneWeekMs) {
+            Log.d(TAG, "Sync ignoré : dernière sync < 1 semaine et DB non vide");
             return;
         }
 
@@ -140,11 +145,15 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         });
     }
 
+    // Executor unique pour toute la chaîne processNextDns (évite conflits Room multi-thread)
+    private final java.util.concurrent.ExecutorService syncExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+
     private void loadDnsSequentially(String login, String password, String expires,
                                       String[] dnsUrls, String[] epgUrls) {
         showSyncStatus("Chargement de vos chaînes…");
-        Executors.newSingleThreadExecutor().execute(() ->
-            processNextDns(0, dnsUrls, login, password, 0));
+        // Reset du verrou si c'est une sync manuelle/forcée (extras frais)
+        syncExecutor.execute(() -> processNextDns(0, dnsUrls, login, password, 0));
     }
 
     private void processNextDns(int index, String[] dnsUrls,
@@ -188,11 +197,15 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
             @Override public void onDone(int count) {
                 Log.d(TAG, "DNS " + idx + " : " + count + " chaînes");
-                processNextDns(index + 1, dnsUrls, login, password, totalAccumulated + count);
+                // Re-poster sur syncExecutor pour que findOrCreatePlaylist() du prochain
+                // DNS s'exécute sur le bon thread (évite crash Room multi-thread)
+                syncExecutor.execute(() ->
+                    processNextDns(index + 1, dnsUrls, login, password, totalAccumulated + count));
             }
             @Override public void onError(String msg) {
                 Log.w(TAG, "DNS " + idx + " erreur : " + msg);
-                processNextDns(index + 1, dnsUrls, login, password, totalAccumulated);
+                syncExecutor.execute(() ->
+                    processNextDns(index + 1, dnsUrls, login, password, totalAccumulated));
             }
         });
     }
