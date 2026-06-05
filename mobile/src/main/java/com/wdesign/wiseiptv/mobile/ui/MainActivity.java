@@ -114,12 +114,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 return;
             }
 
-            // Chemin 1 : extras frais depuis ActivationActivity
-            if (login != null && dnsUrls != null && dnsUrls.length > 0) {
-                processNextDns(0, dnsUrls, login, password != null ? password : "", 
-                        expires != null ? expires : "", dnsEpgUrls != null ? dnsEpgUrls : new String[0], 0);
-                return;
-            }
+           // Chemin 1 : extras frais
+			if (login != null && dnsUrls != null && dnsUrls.length > 0) {
+				processNextDns(0, dnsUrls, login, password != null ? password : "", 
+						expires != null ? expires : "", 
+						dnsEpgUrls != null ? dnsEpgUrls : new String[0], 0);
+				return;
+}
 
             // Chemin 2 : depuis le cache SharedPreferences
             String savedStatus = prefs.getString("status",     "UNKNOWN");
