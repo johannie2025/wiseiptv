@@ -81,18 +81,18 @@ jobs:
           disk-size: 6000M
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: true
-              script: |
-      adb logcat -c
-      adb logcat *:E AndroidRuntime:E > /tmp/logcat.txt &
-      
-      ./gradlew :mobile:connectedDebugAndroidTest \
-        --info \
-        --stacktrace \
-        2>&1 | tee /tmp/test-output.txt || true
-      
-      echo "=== LOGCAT CRASH (dernières 100 lignes) ==="
-      
-      tail -100 /tmp/logcat.txt
+          script: |
+              adb logcat -c
+              adb logcat *:E AndroidRuntime:E > /tmp/logcat.txt &
+              
+              ./gradlew :mobile:connectedDebugAndroidTest \
+                --info \
+                --stacktrace \
+                2>&1 | tee /tmp/test-output.txt || true
+              
+              echo "=== LOGCAT CRASH (dernières 100 lignes) ==="
+              tail -100 /tmp/logcat.txt
+
       - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@v4
