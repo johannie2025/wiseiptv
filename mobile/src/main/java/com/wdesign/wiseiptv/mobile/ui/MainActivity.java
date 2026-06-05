@@ -38,6 +38,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     public static final String EXTRA_DNS_URLS = "act_dns_urls";
     public static final String EXTRA_DNS_EPGS = "act_dns_epg_urls";
 
+    // Alias attendus par ActivationActivity
+    public static final String EXTRA_ACT_LOGIN       = EXTRA_LOGIN;
+    public static final String EXTRA_ACT_PASSWORD    = EXTRA_PASSWORD;
+    public static final String EXTRA_ACT_EXPIRES     = EXTRA_EXPIRES;
+    public static final String EXTRA_ACT_DNS_URLS    = EXTRA_DNS_URLS;
+    public static final String EXTRA_ACT_DNS_EPG_URLS = EXTRA_DNS_EPGS;
+
     private static final String TAG   = "MainActivity";
     private static final String PREFS = "wise_activation";
 
