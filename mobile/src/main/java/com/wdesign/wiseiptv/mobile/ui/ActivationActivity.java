@@ -139,43 +139,47 @@ public class ActivationActivity extends AppCompatActivity {
      * Navigue vers MainActivity en passant login/password/DNS en extras.
      * @param r  résultat frais (null = navigation depuis cache SharedPreferences)
      */
-    private void goToMain(DeviceSecurity.ActivationResult r) {
-        if (isFinishing() || isDestroyed()) return;
-        Intent intent = new Intent(this, MainActivity.class);
+private void goToMain(DeviceSecurity.ActivationResult r) {
+    if (isFinishing() || isDestroyed()) return;
+    Intent intent = new Intent(this, MainActivity.class);
 
-        if (r != null) {
-            // Résultat frais du serveur
-            intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login    != null ? r.login    : "");
-            intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password != null ? r.password : "");
-            intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt != null ? r.expiresAt : "");
-            if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
-                String[] urls    = new String[r.dnsServers.size()];
-                String[] epgUrls = new String[r.dnsServers.size()];
-                for (int i = 0; i < r.dnsServers.size(); i++) {
-                    urls[i]    = r.dnsServers.get(i).url;
-                    epgUrls[i] = r.dnsServers.get(i).epgUrl != null
-                                 ? r.dnsServers.get(i).epgUrl : "";
-                }
-                intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     urls);
-                intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
+    if (r != null) {
+        intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    r.login    != null ? r.login    : "");
+        intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, r.password != null ? r.password : "");
+        intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  r.expiresAt != null ? r.expiresAt : "");
+
+        // === CORRECTION PRINCIPALE ICI ===
+        if (r.dnsServers != null && !r.dnsServers.isEmpty()) {
+            String[] urls    = new String[r.dnsServers.size()];
+            String[] epgUrls = new String[r.dnsServers.size()];
+            for (int i = 0; i < r.dnsServers.size(); i++) {
+                DeviceSecurity.DnsEntry entry = r.dnsServers.get(i);
+                
+                // Protection contre null (cause du crash)
+                urls[i]    = (entry != null && entry.url != null) ? entry.url : "";
+                epgUrls[i] = (entry != null && entry.epgUrl != null) ? entry.epgUrl : "";
             }
-        } else {
-            // Cache : reconstruire les extras depuis SharedPreferences
-            SharedPreferences p = getPrefs();
-            intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    p.getString("login",      ""));
-            intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, p.getString("password",   ""));
-            intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  p.getString("expires_at", ""));
-            String dnsRaw = p.getString("dns_urls",     "");
-            String epgRaw = p.getString("dns_epg_urls", "");
-            if (!dnsRaw.isEmpty()) {
-                intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     dnsRaw.split(","));
-                intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgRaw.split(","));
-            }
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     urls);
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgUrls);
         }
-
-        startActivity(intent);
-        finish();
+    } else {
+        // Partie cache (également sécurisée)
+        SharedPreferences p = getPrefs();
+        intent.putExtra(MainActivity.EXTRA_ACT_LOGIN,    p.getString("login",      ""));
+        intent.putExtra(MainActivity.EXTRA_ACT_PASSWORD, p.getString("password",   ""));
+        intent.putExtra(MainActivity.EXTRA_ACT_EXPIRES,  p.getString("expires_at", ""));
+        
+        String dnsRaw = p.getString("dns_urls",     "");
+        String epgRaw = p.getString("dns_epg_urls", "");
+        if (!dnsRaw.isEmpty()) {
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_URLS,     dnsRaw.split(","));
+            intent.putExtra(MainActivity.EXTRA_ACT_DNS_EPG_URLS, epgRaw.split(","));
+        }
     }
+
+    startActivity(intent);
+    finish();
+}
 
     // ── Affichage état ──────────────────────────────────────────────
 

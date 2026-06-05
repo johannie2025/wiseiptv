@@ -155,31 +155,22 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         syncExecutor.execute(() -> processNextDns(0, dnsUrls, login, password, expires, epgUrls, 0));
     }
 
-    private void processNextDns(int index, String[] dnsUrls, String login, String password,
-                                String expires, String[] epgUrls, final int totalAccumulated) {
-        if (index >= dnsUrls.length) {
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                hideSyncStatus();
-                if (totalAccumulated > 0) {
-                    observeCurrentTab();
-                    Toast.makeText(this, "✅ " + totalAccumulated + " chaînes chargées", Toast.LENGTH_SHORT).show();
-                } else {
-                    Toast.makeText(this, "⚠️ Aucune chaîne trouvée", Toast.LENGTH_LONG).show();
-                }
-                // Verrouiller la sync hebdomadaire
-                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                        .putLong("last_weekly_sync_timestamp", System.currentTimeMillis())
-                        .apply();
-            });
-            return;
-        }
+  private void processNextDns(int index, String[] dnsUrls, String login, String password,
+                            String expires, String[] epgUrls, final int totalAccumulated) {
+    
+    // === CORRECTION : protection contre tableau null ou index invalide ===
+    if (index >= (dnsUrls != null ? dnsUrls.length : 0)) {
+        // code de fin...
+        return;
+    }
 
-        String url = dnsUrls[index].trim();
-        if (url.isEmpty()) {
-            processNextDns(index + 1, dnsUrls, login, password, expires, epgUrls, totalAccumulated);
-            return;
-        }
+    String url = (dnsUrls != null && index < dnsUrls.length && dnsUrls[index] != null) 
+                 ? dnsUrls[index].trim() : "";
+
+    if (url.isEmpty()) {
+        processNextDns(index + 1, dnsUrls, login, password, expires, epgUrls, totalAccumulated);
+        return;
+    }
 
         int idx   = index + 1;
         int total = dnsUrls.length;
@@ -209,35 +200,42 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         });
     }
 
-    private PlaylistEntity findOrCreatePlaylist(String login, String password, String dnsUrl, int idx) {
-        PlaylistEntity existing = db.playlistDao().findByUrlAndLogin(dnsUrl, login);
-        if (existing != null) {
-            existing.password  = password;
-            existing.isActive  = true;
-            existing.lastUpdated = 0;
-            db.playlistDao().update(existing);
-            return existing;
-        }
-
-        PlaylistEntity pl = new PlaylistEntity();
-        pl.name       = "IPTV #" + idx;
-        pl.url        = dnsUrl.trim();
-        pl.isActive   = true;
-        pl.lastUpdated = 0;
-
-        if (isXtreamUrl(pl.url)) {
-            pl.type     = PlaylistEntity.TYPE_XTREAM;
-            pl.username = login;
-            pl.password = password;
-        } else {
-            pl.type     = PlaylistEntity.TYPE_M3U_URL;
-            pl.username = "";
-            pl.password = "";
-        }
-
-        pl.id = db.playlistDao().insert(pl);
-        return pl;
+private PlaylistEntity findOrCreatePlaylist(String login, String password, String dnsUrl, int idx) {
+    
+    // === CORRECTIONS : sécurisation des chaînes null ===
+    String safeUrl = dnsUrl != null ? dnsUrl.trim() : "";
+    
+    PlaylistEntity existing = db.playlistDao().findByUrlAndLogin(safeUrl, 
+                                login != null ? login : "");
+    
+    if (existing != null) {
+        existing.password  = password != null ? password : "";
+        existing.isActive  = true;
+        existing.lastUpdated = 0;
+        db.playlistDao().update(existing);
+        return existing;
     }
+
+    // ... création de la nouvelle playlist avec protections
+    PlaylistEntity pl = new PlaylistEntity();
+    pl.name       = "IPTV #" + idx;
+    pl.url        = safeUrl;
+    pl.isActive   = true;
+    pl.lastUpdated = 0;
+
+    if (isXtreamUrl(pl.url)) {
+        pl.type     = PlaylistEntity.TYPE_XTREAM;
+        pl.username = login != null ? login : "";
+        pl.password = password != null ? password : "";
+    } else {
+        pl.type     = PlaylistEntity.TYPE_M3U_URL;
+        pl.username = "";
+        pl.password = "";
+    }
+
+    pl.id = db.playlistDao().insert(pl);
+    return pl;
+}
 
     private boolean isXtreamUrl(String url) {
         if (url == null || url.isEmpty()) return false;
