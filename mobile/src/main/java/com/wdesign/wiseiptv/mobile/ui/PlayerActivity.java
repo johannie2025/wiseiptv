@@ -13,9 +13,12 @@ import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
 import com.wdesign.wiseiptv.mobile.R;
 import java.util.concurrent.Executors;
+
 @OptIn(markerClass = UnstableApi.class)
 public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Listener {
     public static final String EXTRA_ID="ch_id", EXTRA_NAME="ch_name", EXTRA_URL="ch_url", EXTRA_TYPE="ch_type";
+	public static final String EXTRA_GROUP = "extra_group";
+	public static final String EXTRA_ORDER = "extra_order";
     private PlayerView playerView;
     private PlayerEngine engine;
     private ProgressBar progressBar;
