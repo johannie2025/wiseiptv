@@ -1,27 +1,17 @@
 package com.wdesign.wiseiptv.mobile;
-
 import android.app.Application;
-import com.wdesign.wiseiptv.core.db.AppDatabase;
-
-/**
- * WiseApp — Application singleton.
- *
- * CORRECTION : checkAndSync() a été retiré d'ici.
- * Il causait un double appel réseau + double transaction Room en parallèle avec
- * celui de MainActivity, provoquant des deadlocks et des crashes aléatoires.
- *
- * Le seul déclencheur du téléchargement est désormais MainActivity.startBackgroundSync(),
- * qui reçoit l'ActivationResult directement depuis ActivationActivity via extras Intent.
- * WiseApp se contente d'initialiser la BDD pour qu'elle soit prête dès le démarrage.
- */
+import android.preference.PreferenceManager;
 public class WiseApp extends Application {
+    public static final String PREF_PLAYLIST_URL = "playlist_url";
+    public static final String PREF_PLAYLIST_NAME = "playlist_name";
     private static WiseApp instance;
     public static WiseApp get() { return instance; }
-
-    @Override public void onCreate() {
-        super.onCreate();
-        instance = this;
-        // Pré-initialiser la BDD en arrière-plan pour réduire la latence au premier accès
-        AppDatabase.get(this);
+    @Override public void onCreate() { super.onCreate(); instance = this; }
+    public String getPlaylistUrl() {
+        return PreferenceManager.getDefaultSharedPreferences(this).getString(PREF_PLAYLIST_URL, "");
+    }
+    public void savePlaylist(String name, String url) {
+        PreferenceManager.getDefaultSharedPreferences(this).edit()
+            .putString(PREF_PLAYLIST_URL, url).putString(PREF_PLAYLIST_NAME, name).apply();
     }
 }

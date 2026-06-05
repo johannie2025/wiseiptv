@@ -1,67 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="wrap_content">
-<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
     android:orientation="vertical" android:padding="16dp">
-
     <EditText android:id="@+id/et_playlist_name"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:hint="Nom de la playlist" android:layout_marginBottom="12dp"/>
-
-    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:text="Type de source" android:textStyle="bold" android:layout_marginBottom="4dp"/>
-
-    <RadioGroup android:id="@+id/rg_type"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:layout_marginBottom="12dp">
-        <RadioButton android:id="@+id/rb_m3u_url"  android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:text="URL M3U" android:checked="true"/>
-        <RadioButton android:id="@+id/rb_m3u_file" android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:text="Fichier local" android:layout_marginStart="12dp"/>
-        <RadioButton android:id="@+id/rb_xtream"   android:layout_width="wrap_content"
-            android:layout_height="wrap_content" android:text="Xtream" android:layout_marginStart="12dp"/>
-    </RadioGroup>
-
-    <!-- M3U URL -->
+        android:hint="Nom (optionnel)" android:layout_marginBottom="12dp"/>
     <EditText android:id="@+id/et_playlist_url"
         android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:hint="http://..." android:inputType="textUri"
-        android:layout_marginBottom="8dp"/>
-
-    <!-- Fichier local -->
-    <LinearLayout android:id="@+id/layout_file"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:visibility="gone" android:layout_marginBottom="8dp">
-        <TextView android:id="@+id/tv_file_path"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:text="Aucun fichier sélectionné" android:textColor="#FFAAAAAA"
-            android:padding="8dp" android:background="#1A2233" android:layout_marginBottom="4dp"/>
-        <Button android:id="@+id/btn_pick_file"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="📂 Parcourir…" android:textSize="13sp"/>
-    </LinearLayout>
-
-    <!-- Xtream -->
-    <LinearLayout android:id="@+id/layout_xtream"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="vertical" android:visibility="gone">
-        <EditText android:id="@+id/et_xtream_server"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="Serveur : http://..." android:inputType="textUri"
-            android:layout_marginBottom="8dp"/>
-        <EditText android:id="@+id/et_xtream_user"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="Nom d'utilisateur" android:layout_marginBottom="8dp"/>
-        <EditText android:id="@+id/et_xtream_pass"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:hint="Mot de passe" android:inputType="textPassword"/>
-    </LinearLayout>
-
-    <!-- EPG (optionnel, tous types) -->
-    <EditText android:id="@+id/et_epg_url"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:hint="URL EPG (optionnel) : http://epg.it999.ru/epg.xml.gz"
-        android:inputType="textUri" android:layout_marginTop="12dp"/>
-
+        android:hint="URL M3U : http://..." android:inputType="textUri"/>
 </LinearLayout>
-</ScrollView>

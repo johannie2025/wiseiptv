@@ -4,6 +4,4 @@
     <string name="nav_home">Accueil</string>
     <string name="nav_add">Playlist</string>
     <string name="nav_settings">Paramètres</string>
-    <string name="all_groups">Tous les groupes</string>
-    <string name="zap_hint">Swipe gauche/droite pour changer de chaîne</string>
 </resources>

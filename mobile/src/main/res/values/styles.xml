@@ -13,11 +13,4 @@
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowBackground">@android:color/black</item>
     </style>
-	
-
-    <style name="SearchViewStyle" parent="Widget.AppCompat.SearchView">
-        <item name="android:editTextColor">#FFFFFF</item>
-        <item name="android:textColorHint">#94A3B8</item>
-    </style>
 </resources>
-
