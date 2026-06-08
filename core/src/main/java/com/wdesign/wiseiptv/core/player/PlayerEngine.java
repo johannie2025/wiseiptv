@@ -1,21 +1,4 @@
 package com.wdesign.wiseiptv.core.player;
-import androidx.media3.exoplayer.DefaultLoadControl;
-import android.content.Context;
-import android.net.Uri;
-import android.util.Log;
-import androidx.annotation.OptIn;
-import androidx.media3.common.*;
-import androidx.media3.common.util.UnstableApi;
-import androidx.media3.exoplayer.*;
-import androidx.media3.exoplayer.trackselection.*;
-import androidx.media3.datasource.*;
-import androidx.media3.datasource.okhttp.OkHttpDataSource;
-import androidx.media3.ui.PlayerView;
-import okhttp3.OkHttpClient;
-import java.util.concurrent.TimeUnit;
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
-
-package com.wdesign.wiseiptv.core.player;
 
 import androidx.media3.exoplayer.DefaultLoadControl;
 import android.content.Context;
@@ -103,8 +86,8 @@ public class PlayerEngine {
             }
         });
     }
-	
-   public void attachView(PlayerView v) { 
+
+    public void attachView(PlayerView v) { 
         v.setPlayer(exoPlayer); 
     }
 
