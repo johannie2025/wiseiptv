@@ -1,5 +1,7 @@
+**W Design — +240 222 886 007 (WhatsApp)**
+WhatsApp : +240 222 886 007
 # Wise IPTV — Projet Android Multi-Module
-**W Design — +240 555 445 514 (WhatsApp)**
+**W Design — +240 222 886 007 (WhatsApp)**
 
 ---
 
@@ -124,4 +126,4 @@ http://stream.url/live.m3u8
 ## Support
 
 **W Design**
-WhatsApp : +240 555 445 514
+WhatsApp : +240 222 886 007

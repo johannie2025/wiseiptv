@@ -21,6 +21,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
     public static final String EXTRA_TYPE  = "type";
     public static final String EXTRA_GROUP = "group";
     public static final String EXTRA_ORDER = "order";
+    public static final String EXTRA_START_POSITION = "start_position";
 
     private PlayerView playerView;
     private PlayerEngine engine;
@@ -62,6 +63,8 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         engine = new PlayerEngine(this, this);
         engine.attachView(playerView);
         engine.play(streamUrl);
+        long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
+        if (startPosition > 0) engine.seekTo(startPosition);
         showOsd();
     }
 

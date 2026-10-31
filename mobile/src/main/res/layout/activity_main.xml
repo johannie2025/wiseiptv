@@ -5,6 +5,11 @@
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@color/wise_bg">
 
+    <ImageView android:id="@+id/home_backdrop"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="centerCrop" android:alpha="0.18"
+        android:visibility="gone"/>
+
     <com.google.android.material.appbar.AppBarLayout
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:background="@color/wise_surface">
@@ -22,6 +27,13 @@
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:minWidth="120dp"
                 android:layout_marginStart="8dp"/>
+            <ImageButton android:id="@+id/btn_grid"
+                android:layout_width="44dp" android:layout_height="44dp"
+                android:layout_marginStart="4dp"
+                android:src="@android:drawable/ic_menu_sort_by_size"
+                android:contentDescription="Disposition de la grille"
+                android:background="?selectableItemBackgroundBorderless"
+                android:tint="@color/white"/>
         </LinearLayout>
 
         <!-- Statut sync (playlist téléchargée, erreur réseau, etc.) -->
@@ -48,9 +60,25 @@
 
     <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
+        <FrameLayout android:id="@+id/home_preview_container"
+            android:layout_width="match_parent" android:layout_height="168dp"
+            android:background="#CC000000" android:visibility="gone">
+            <androidx.media3.ui.PlayerView android:id="@+id/home_preview_player"
+                android:layout_width="match_parent" android:layout_height="match_parent"
+                app:use_controller="false" app:resize_mode="zoom"/>
+            <TextView android:id="@+id/tv_home_preview_name"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_gravity="bottom" android:background="#99000000"
+                android:paddingStart="14dp" android:paddingEnd="14dp"
+                android:paddingTop="8dp" android:paddingBottom="8dp"
+                android:textColor="@color/white" android:textSize="14sp"
+                android:textStyle="bold" android:maxLines="1"
+                android:ellipsize="end"/>
+        </FrameLayout>
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/rv_channels"
             android:layout_width="match_parent" android:layout_height="match_parent"
+            android:layout_marginTop="168dp"
             android:padding="4dp" android:clipToPadding="false"/>
         <ProgressBar android:id="@+id/progress_bar"
             android:layout_width="48dp" android:layout_height="48dp"

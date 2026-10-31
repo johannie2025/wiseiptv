@@ -13,12 +13,15 @@ import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
 import com.wdesign.wiseiptv.mobile.R;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.LinkedHashSet;
 
 @OptIn(markerClass = UnstableApi.class)
 public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Listener {
     public static final String EXTRA_ID="ch_id", EXTRA_NAME="ch_name", EXTRA_URL="ch_url", EXTRA_TYPE="ch_type";
 	public static final String EXTRA_GROUP = "extra_group";
 	public static final String EXTRA_ORDER = "extra_order";
+    public static final String EXTRA_START_POSITION = "start_position";
     private PlayerView playerView;
     private PlayerEngine engine;
     private ProgressBar progressBar;
@@ -29,11 +32,20 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
     private long channelId;
     private String channelName, streamUrl;
     private int contentType;
+        private int sortOrder;
+        private String groupTitle;
     private boolean isFav;
     private AudioManager audioManager;
     private GestureDetector gestureDetector;
+        private ImageButton btnPrevious, btnNext;
+        private View zapControls;
+        private final ExecutorService zapExecutor = Executors.newSingleThreadExecutor();
     private final Handler osdHandler = new Handler(Looper.getMainLooper());
-    private final Runnable hideOsd = () -> osdTop.animate().alpha(0).setDuration(300).start();
+        private final Runnable hideOsd = () -> {
+            osdTop.animate().alpha(0).setDuration(300).start();
+            zapControls.animate().alpha(0).setDuration(300)
+                .withEndAction(() -> zapControls.setVisibility(View.GONE)).start();
+        };
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -46,6 +58,9 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
         channelName = getIntent().getStringExtra(EXTRA_NAME);
         streamUrl   = getIntent().getStringExtra(EXTRA_URL);
         contentType = getIntent().getIntExtra(EXTRA_TYPE, 0);
+        rememberRecentChannel();
+            groupTitle = getIntent().getStringExtra(EXTRA_GROUP);
+            sortOrder = getIntent().getIntExtra(EXTRA_ORDER, 0);
         playerView    = findViewById(R.id.player_view);
         progressBar   = findViewById(R.id.progress_bar);
         tvChannelName = findViewById(R.id.tv_channel_name);
@@ -54,15 +69,22 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
         btnFav        = findViewById(R.id.btn_fav);
         btnQuality    = findViewById(R.id.btn_quality);
         btnBack       = findViewById(R.id.btn_back);
+            btnPrevious   = findViewById(R.id.btn_previous);
+            btnNext       = findViewById(R.id.btn_next);
         osdTop        = findViewById(R.id.osd_top);
+            zapControls  = findViewById(R.id.osd_zap_controls);
         tvChannelName.setText(channelName);
         btnBack.setOnClickListener(v -> finish());
+            btnPrevious.setOnClickListener(v -> zapChannel(-1));
+            btnNext.setOnClickListener(v -> zapChannel(1));
         btnQuality.setOnClickListener(v -> showQualityPicker());
         btnFav.setOnClickListener(v -> toggleFav());
         playerView.setOnClickListener(v -> showOsd());
         engine = new PlayerEngine(this, this);
         engine.attachView(playerView);
         engine.play(streamUrl);
+        long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
+        if (startPosition > 0) engine.seekTo(startPosition);
         loadFavState(); setupGestures(); showOsd();
     }
     @Override public void onBuffering(boolean b) { runOnUiThread(() -> progressBar.setVisibility(b ? View.VISIBLE : View.GONE)); }
@@ -77,10 +99,17 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
     }
     private void showOsd() {
         osdTop.animate().alpha(1).setDuration(200).start();
+        zapControls.setVisibility(View.VISIBLE);
+        zapControls.animate().alpha(1).setDuration(200).start();
         osdHandler.removeCallbacks(hideOsd); osdHandler.postDelayed(hideOsd, 4000);
     }
     private void setupGestures() {
         gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            private static final int SWIPE_DISTANCE = 90;
+            private static final int SWIPE_VELOCITY = 100;
+
+            @Override public boolean onDown(MotionEvent event) { return true; }
+
             @Override public boolean onScroll(MotionEvent e1, MotionEvent e2, float dx, float dy) {
                 if (e1 == null) return false;
                 float w = playerView.getWidth(); float absY = Math.abs(dy);
@@ -98,8 +127,47 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
                 }
                 return false;
             }
+
+            @Override public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                if (e1 == null || e2 == null) return false;
+                float deltaX = e2.getX() - e1.getX();
+                float deltaY = e2.getY() - e1.getY();
+                if (Math.abs(deltaX) > Math.abs(deltaY)
+                    && Math.abs(deltaX) > SWIPE_DISTANCE
+                    && Math.abs(velocityX) > SWIPE_VELOCITY) {
+                    zapChannel(deltaX < 0 ? 1 : -1);
+                    return true;
+                }
+                return false;
+            }
         });
         playerView.setOnTouchListener((v, e) -> gestureDetector.onTouchEvent(e));
+    }
+
+    private void zapChannel(int direction) {
+        if (channelId < 0) return;
+        zapExecutor.execute(() -> {
+            ChannelEntity target = direction < 0
+                ? db.channelDao().getPrev(sortOrder, contentType, groupTitle)
+                : db.channelDao().getNext(sortOrder, contentType, groupTitle);
+            if (target == null) return;
+            runOnUiThread(() -> {
+                channelId = target.id;
+                channelName = target.name;
+                streamUrl = target.streamUrl;
+                groupTitle = target.groupTitle;
+                sortOrder = target.sortOrder;
+                contentType = target.contentType;
+                rememberRecentChannel();
+                tvChannelName.animate().alpha(0).setDuration(100).withEndAction(() -> {
+                    tvChannelName.setText(channelName);
+                    tvChannelName.animate().alpha(1).setDuration(160).start();
+                }).start();
+                engine.play(streamUrl);
+                showOsd();
+                loadFavState();
+            });
+        });
     }
     private void loadFavState() {
         if (channelId < 0) return;
@@ -107,6 +175,21 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
             ChannelEntity ch = db.channelDao().findById(channelId);
             if (ch != null) { isFav = ch.isFavorite; runOnUiThread(this::updateFavIcon); }
         });
+    }
+
+    private void rememberRecentChannel() {
+        if (channelId < 0) return;
+        android.content.SharedPreferences prefs = getSharedPreferences("wise_mobile_recents", MODE_PRIVATE);
+        String oldIds = prefs.getString("ids", "");
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        ids.add(String.valueOf(channelId));
+        if (!oldIds.isEmpty()) {
+            for (String id : oldIds.split(",")) {
+                if (ids.size() >= 20) break;
+                if (!id.equals(String.valueOf(channelId))) ids.add(id);
+            }
+        }
+        prefs.edit().putString("ids", android.text.TextUtils.join(",", ids)).apply();
     }
     private void toggleFav() {
         isFav = !isFav; updateFavIcon();
@@ -119,6 +202,7 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
     @Override protected void onStop() { super.onStop(); if (engine != null) engine.pause(); }
     @Override protected void onDestroy() {
         super.onDestroy(); osdHandler.removeCallbacksAndMessages(null);
+        zapExecutor.shutdownNow();
         if (engine != null) { engine.release(); engine = null; }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }

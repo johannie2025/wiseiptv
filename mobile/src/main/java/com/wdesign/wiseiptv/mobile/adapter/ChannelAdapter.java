@@ -22,6 +22,13 @@ public class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
     }
     @Override public void onBindViewHolder(@NonNull VH h, int pos) {
         ChannelEntity ch = data.get(pos);
+        if (!h.hasEntered) {
+            h.hasEntered = true;
+            h.itemView.setAlpha(0f);
+            h.itemView.setTranslationY(12f);
+            h.itemView.animate().alpha(1f).translationY(0f)
+                .setDuration(220).setStartDelay(Math.min(pos * 16L, 144L)).start();
+        }
         h.tvName.setText(ch.name);
         h.tvLive.setVisibility(ch.contentType == ChannelEntity.TYPE_LIVE ? View.VISIBLE : View.GONE);
         if (ch.logoUrl != null && !ch.logoUrl.isEmpty()) {
@@ -33,8 +40,15 @@ public class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
         h.itemView.setOnClickListener(v -> listener.onClick(ch));
     }
     @Override public int getItemCount() { return data.size(); }
+    @Override public void onViewRecycled(@NonNull VH h) {
+        h.itemView.animate().cancel();
+        h.itemView.setAlpha(1f);
+        h.itemView.setTranslationY(0f);
+        super.onViewRecycled(h);
+    }
     static class VH extends RecyclerView.ViewHolder {
         ImageView imgLogo; TextView tvName, tvLive;
+        boolean hasEntered;
         VH(View v) { super(v); imgLogo = v.findViewById(R.id.img_logo);
             tvName = v.findViewById(R.id.tv_name); tvLive = v.findViewById(R.id.tv_live); }
     }

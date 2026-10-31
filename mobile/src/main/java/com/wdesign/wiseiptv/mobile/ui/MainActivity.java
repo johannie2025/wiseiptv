@@ -6,13 +6,18 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
 import android.widget.*;
+import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.*;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.ui.PlayerView;
+import com.bumptech.glide.Glide;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.tabs.TabLayout;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
+import com.wdesign.wiseiptv.core.player.PlayerEngine;
 import com.wdesign.wiseiptv.mobile.R;
 import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
 import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
@@ -29,6 +34,7 @@ import java.util.concurrent.Executors;
  *  3. Sinon refresh stale des playlists manuelles
  *  4. processNextDns() : séquentiel, auto-détect Xtream vs M3U URL
  */
+@OptIn(markerClass = UnstableApi.class)
 public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
     // Extras reçus depuis ActivationActivity
@@ -55,12 +61,27 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private TabLayout             tabLayout;
     private BottomNavigationView  bottomNav;
     private SearchView            searchView;
+    private ImageButton            btnGrid;
+    private GridLayoutManager      gridLayoutManager;
+    private ImageView              homeBackdrop;
+    private FrameLayout            homePreviewContainer;
+    private PlayerView             homePreviewView;
+    private TextView               tvHomePreviewName;
+    private PlayerEngine           homePreviewEngine;
+    private List<ChannelEntity>    homeChannels = new java.util.ArrayList<>();
+    private long                   previewChannelId = -1;
+    private long                   previewPositionMs;
+    private boolean                showingHome = true;
+    private static final String    PREFS_RECENTS = "wise_mobile_recents";
+    private static final int       MAX_RECENTS = 20;
     private AppDatabase           db;
     private int                   currentTab = 0;
 
     // Executor unique pour toute la chaîne processNextDns — évite conflits Room multi-thread
     private final java.util.concurrent.ExecutorService syncExecutor =
         java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final Handler previewHandler = new Handler(Looper.getMainLooper());
+    private final Runnable updateRecentPreview = this::previewVisibleRecent;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,15 +95,32 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         tabLayout    = findViewById(R.id.tab_layout);
         bottomNav    = findViewById(R.id.bottom_nav);
         searchView   = findViewById(R.id.search_view);
+        btnGrid      = findViewById(R.id.btn_grid);
+        homeBackdrop = findViewById(R.id.home_backdrop);
+        homePreviewContainer = findViewById(R.id.home_preview_container);
+        homePreviewView = findViewById(R.id.home_preview_player);
+        tvHomePreviewName = findViewById(R.id.tv_home_preview_name);
 
         adapter = new ChannelAdapter(this);
-        rvChannels.setLayoutManager(new GridLayoutManager(this, 3));
+        int gridColumns = getSharedPreferences("wise_display", MODE_PRIVATE)
+            .getInt("grid_columns", 3);
+        gridColumns = Math.max(2, Math.min(5, gridColumns));
+        gridLayoutManager = new GridLayoutManager(this, gridColumns);
+        rvChannels.setLayoutManager(gridLayoutManager);
         rvChannels.setAdapter(adapter);
+        rvChannels.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override public void onScrollStateChanged(@androidx.annotation.NonNull RecyclerView view, int state) {
+                if (state == RecyclerView.SCROLL_STATE_IDLE && showingHome) {
+                    previewHandler.removeCallbacks(updateRecentPreview);
+                    previewHandler.postDelayed(updateRecentPreview, 350);
+                }
+            }
+        });
 
+        setupGridChooser();
         setupTabs();
         setupSearch();
         setupBottomNav();
-        observeCurrentTab();
         startBackgroundSync();
     }
 
@@ -156,7 +194,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 showSync(false, null);
-                observeCurrentTab();
+                if (showingHome) showRecentHome(); else observeCurrentTab();
                 if (total > 0)
                     Toast.makeText(this, "✅ " + total + " chaînes chargées",
                         Toast.LENGTH_SHORT).show();
@@ -258,7 +296,10 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         for (String t : tabs) tabLayout.addTab(tabLayout.newTab().setText(t));
         tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override public void onTabSelected(TabLayout.Tab t) {
-                currentTab = t.getPosition(); observeCurrentTab();
+                currentTab = t.getPosition();
+                showingHome = false;
+                showCategoryList();
+                observeCurrentTab();
             }
             @Override public void onTabUnselected(TabLayout.Tab t) {}
             @Override public void onTabReselected(TabLayout.Tab t) {}
@@ -276,28 +317,156 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     }
 
     private void updateList(List<ChannelEntity> list) {
+        if (showingHome) return;
         if (adapter != null) adapter.setData(list);
         if (tvEmpty != null)
             tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
+    private void showCategoryList() {
+        homePreviewContainer.setVisibility(View.GONE);
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) rvChannels.getLayoutParams();
+        params.topMargin = 0;
+        rvChannels.setLayoutParams(params);
+        if (homePreviewEngine != null) homePreviewEngine.pause();
+    }
+
+    private void showRecentHome() {
+        showingHome = true;
+        homePreviewContainer.setVisibility(View.VISIBLE);
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) rvChannels.getLayoutParams();
+        params.topMargin = Math.round(168 * getResources().getDisplayMetrics().density);
+        rvChannels.setLayoutParams(params);
+        syncExecutor.execute(() -> {
+            String raw = getSharedPreferences(PREFS_RECENTS, MODE_PRIVATE).getString("ids", "");
+            List<ChannelEntity> recent = new java.util.ArrayList<>();
+            if (!raw.isEmpty()) {
+                for (String id : raw.split(",")) {
+                    try {
+                        ChannelEntity channel = db.channelDao().findById(Long.parseLong(id));
+                        if (channel != null) recent.add(channel);
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            runOnUiThread(() -> {
+                if (!showingHome || isFinishing() || isDestroyed()) return;
+                homeChannels = recent;
+                adapter.setData(recent);
+                if (tvEmpty != null) {
+                    tvEmpty.setText("Vos chaînes regardées apparaîtront ici.");
+                    tvEmpty.setVisibility(recent.isEmpty() ? View.VISIBLE : View.GONE);
+                }
+                if (recent.isEmpty()) {
+                    homePreviewContainer.setVisibility(View.GONE);
+                    clearAdaptiveBackdrop();
+                } else {
+                    homePreviewContainer.setVisibility(View.VISIBLE);
+                    previewRecent(recent.get(0));
+                }
+            });
+        });
+    }
+
+    private void previewVisibleRecent() {
+        if (!showingHome || homeChannels.isEmpty()) return;
+        int position = gridLayoutManager.findFirstVisibleItemPosition();
+        if (position >= 0 && position < homeChannels.size()) previewRecent(homeChannels.get(position));
+    }
+
+    private void previewRecent(ChannelEntity channel) {
+        if (channel.logoUrl != null && !channel.logoUrl.isEmpty()) {
+            homeBackdrop.setVisibility(View.VISIBLE);
+            Glide.with(this).load(channel.logoUrl).centerCrop().into(homeBackdrop);
+            homeBackdrop.animate().alpha(0.18f).setDuration(280).start();
+        } else {
+            clearAdaptiveBackdrop();
+        }
+        tvHomePreviewName.setText(channel.name);
+        if (homePreviewEngine == null) {
+            homePreviewEngine = new PlayerEngine(this, new PlayerEngine.Listener() {
+                @Override public void onBuffering(boolean buffering) {}
+                @Override public void onPlaying() {}
+                @Override public void onError(String message) {}
+            });
+            homePreviewEngine.attachView(homePreviewView);
+        }
+        if (previewChannelId != channel.id) {
+            previewChannelId = channel.id;
+            previewPositionMs = 0;
+            homePreviewEngine.play(channel.streamUrl);
+        } else if (!homePreviewEngine.isPlaying()) {
+            homePreviewEngine.resume();
+        }
+    }
+
+    private void clearAdaptiveBackdrop() {
+        homeBackdrop.animate().alpha(0f).setDuration(240)
+            .withEndAction(() -> homeBackdrop.setVisibility(View.GONE)).start();
+    }
+
+    private void saveRecent(ChannelEntity channel) {
+        String raw = getSharedPreferences(PREFS_RECENTS, MODE_PRIVATE).getString("ids", "");
+        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+        ids.add(String.valueOf(channel.id));
+        if (!raw.isEmpty()) {
+            for (String id : raw.split(",")) {
+                if (ids.size() >= MAX_RECENTS) break;
+                if (!id.equals(String.valueOf(channel.id))) ids.add(id);
+            }
+        }
+        getSharedPreferences(PREFS_RECENTS, MODE_PRIVATE).edit()
+            .putString("ids", TextUtils.join(",", ids)).apply();
+    }
+
     private void setupSearch() {
         if (searchView == null) return;
+        int searchTextId = getResources().getIdentifier("search_src_text", "id", "android");
+        TextView searchText = searchView.findViewById(searchTextId);
+        if (searchText != null) {
+            searchText.setTextColor(getResources().getColor(R.color.white));
+            searchText.setHintTextColor(0xFFB8C0CC);
+        }
         searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override public boolean onQueryTextSubmit(String q) { return false; }
             @Override public boolean onQueryTextChange(String q) {
-                if (TextUtils.isEmpty(q)) { observeCurrentTab(); return true; }
+                if (TextUtils.isEmpty(q)) {
+                    if (showingHome) showRecentHome(); else observeCurrentTab();
+                    return true;
+                }
+                showingHome = false;
+                showCategoryList();
                 db.channelDao().search(q).observe(MainActivity.this, MainActivity.this::updateList);
                 return true;
             }
         });
     }
 
+    private void setupGridChooser() {
+        if (btnGrid == null) return;
+        btnGrid.setOnClickListener(anchor -> {
+            android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+            for (int columns = 2; columns <= 5; columns++) {
+                menu.getMenu().add(0, columns, columns, columns + " colonnes");
+            }
+            menu.setOnMenuItemClickListener(item -> {
+                setGridColumns(item.getItemId());
+                return true;
+            });
+            menu.show();
+        });
+    }
+
+    private void setGridColumns(int columns) {
+        gridLayoutManager.setSpanCount(columns);
+        getSharedPreferences("wise_display", MODE_PRIVATE).edit()
+            .putInt("grid_columns", columns).apply();
+    }
+
     private void setupBottomNav() {
         if (bottomNav == null) return;
         bottomNav.setOnItemSelectedListener(item -> {
             int id = item.getItemId();
-            if      (id == R.id.nav_home)    { observeCurrentTab(); return true; }
+            if      (id == R.id.nav_home)    { showRecentHome(); return true; }
             else if (id == R.id.nav_add)     { showAddPlaylistDialog(); return true; }
             else if (id == R.id.nav_settings){ startActivity(new Intent(this, SettingsActivity.class)); return true; }
             return false;
@@ -329,7 +498,8 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
                     @Override public void onDone(int c) {
                         runOnUiThread(() -> {
-                            showSync(false, null); observeCurrentTab();
+                            showSync(false, null);
+                            if (showingHome) showRecentHome(); else observeCurrentTab();
                             Toast.makeText(MainActivity.this, c + " chaînes ✅",
                                 Toast.LENGTH_SHORT).show();
                         });
@@ -352,18 +522,41 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     @Override
     public void onClick(ChannelEntity ch) {
+        saveRecent(ch);
+        previewRecent(ch);
+        previewPositionMs = ch.contentType == ChannelEntity.TYPE_LIVE
+            || ch.id != previewChannelId || homePreviewEngine == null
+            ? 0 : homePreviewEngine.getPosition();
+        if (homePreviewEngine != null) homePreviewEngine.pause();
         Intent i = new Intent(this, PlayerActivity.class);
         i.putExtra(PlayerActivity.EXTRA_ID,   ch.id);
         i.putExtra(PlayerActivity.EXTRA_NAME, ch.name);
         i.putExtra(PlayerActivity.EXTRA_URL,  ch.streamUrl);
         i.putExtra(PlayerActivity.EXTRA_TYPE, ch.contentType);
+        i.putExtra(PlayerActivity.EXTRA_GROUP, ch.groupTitle);
+        i.putExtra(PlayerActivity.EXTRA_ORDER, ch.sortOrder);
+        if (previewPositionMs > 0) i.putExtra(PlayerActivity.EXTRA_START_POSITION, previewPositionMs);
         startActivity(i);
     }
 
-    @Override protected void onResume() { super.onResume(); observeCurrentTab(); }
+    @Override protected void onResume() {
+        super.onResume();
+        if (showingHome) showRecentHome(); else observeCurrentTab();
+    }
+
+    @Override protected void onPause() {
+        if (homePreviewEngine != null) {
+            previewPositionMs = homePreviewEngine.getPosition();
+            homePreviewEngine.pause();
+        }
+        super.onPause();
+    }
 
     @Override protected void onDestroy() {
         super.onDestroy();
+        previewHandler.removeCallbacksAndMessages(null);
+        if (homePreviewView != null) homePreviewView.setPlayer(null);
+        if (homePreviewEngine != null) { homePreviewEngine.release(); homePreviewEngine = null; }
         syncExecutor.shutdownNow();
     }
 }

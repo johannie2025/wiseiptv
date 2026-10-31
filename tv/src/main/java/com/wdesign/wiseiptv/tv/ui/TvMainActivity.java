@@ -9,12 +9,17 @@ import android.text.TextWatcher;
 import android.util.Log;
 import android.view.View;
 import android.widget.*;
+import androidx.annotation.OptIn;
 import androidx.fragment.app.FragmentActivity;
 import androidx.leanback.app.BrowseSupportFragment;
 import androidx.leanback.widget.*;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.ui.PlayerView;
+import com.bumptech.glide.Glide;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
+import com.wdesign.wiseiptv.core.player.PlayerEngine;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
 import com.wdesign.wiseiptv.tv.R;
 import com.wdesign.wiseiptv.tv.adapter.TvCardPresenter;
@@ -23,6 +28,7 @@ import com.wdesign.wiseiptv.tv.util.PlaylistLoader;
 import java.util.*;
 import java.util.concurrent.Executors;
 
+@OptIn(markerClass = UnstableApi.class)
 public class TvMainActivity extends FragmentActivity {
 
     public static final String EXTRA_ACT_LOGIN        = "act_login";
@@ -42,6 +48,16 @@ public class TvMainActivity extends FragmentActivity {
     // Barre supérieure custom
     private TextView    btnSearch, btnAdd, btnSync, btnRecents, tvSyncStatus;
     private ProgressBar progressBar;
+    private PlayerView previewPlayerView;
+    private TextView previewName;
+    private ImageView tvBackdrop;
+    private PlayerEngine previewEngine;
+    private ChannelEntity pendingPreview;
+    private long previewChannelId = -1;
+    private final Handler previewHandler = new Handler(Looper.getMainLooper());
+    private final Runnable startPreview = () -> {
+        if (pendingPreview != null) playPreview(pendingPreview);
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,6 +73,9 @@ public class TvMainActivity extends FragmentActivity {
         btnRecents   = findViewById(R.id.btn_recents);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
         progressBar  = findViewById(R.id.progress_bar);
+        previewPlayerView = findViewById(R.id.tv_preview_player);
+        previewName = findViewById(R.id.tv_preview_name);
+        tvBackdrop = findViewById(R.id.tv_backdrop);
 
         // Boutons top bar
         btnSearch.setOnClickListener(v -> showSearchDialog());
@@ -110,6 +129,47 @@ protected void onResume() {
         browseFragment.setOnItemViewClickedListener((ivh, item, rvh, row) -> {
             if (item instanceof ChannelEntity) openPlayer((ChannelEntity) item);
         });
+        browseFragment.setOnItemViewSelectedListener((ivh, item, rvh, row) -> {
+            if (item instanceof ChannelEntity) selectPreview((ChannelEntity) item);
+        });
+    }
+
+    private void selectPreview(ChannelEntity channel) {
+        pendingPreview = channel;
+        previewName.setText(channel.name);
+        if (channel.logoUrl != null && !channel.logoUrl.isEmpty()) {
+            tvBackdrop.setVisibility(View.VISIBLE);
+            Glide.with(this).load(channel.logoUrl).centerCrop().into(tvBackdrop);
+            tvBackdrop.animate().alpha(0.16f).setDuration(280).start();
+        } else {
+            tvBackdrop.animate().alpha(0f).setDuration(220)
+                .withEndAction(() -> tvBackdrop.setVisibility(View.GONE)).start();
+        }
+        previewHandler.removeCallbacks(startPreview);
+        if (previewChannelId != channel.id) {
+            if (previewEngine != null) previewEngine.pause();
+            previewHandler.postDelayed(startPreview, 450);
+        } else if (previewEngine != null && !previewEngine.isPlaying()) {
+            previewEngine.resume();
+        }
+    }
+
+    private void playPreview(ChannelEntity channel) {
+        if (isFinishing() || isDestroyed() || channel.id != pendingPreview.id) return;
+        if (previewChannelId == channel.id && previewEngine != null) {
+            previewEngine.resume();
+            return;
+        }
+        if (previewEngine == null) {
+            previewEngine = new PlayerEngine(this, new PlayerEngine.Listener() {
+                @Override public void onBuffering(boolean buffering) {}
+                @Override public void onPlaying() {}
+                @Override public void onError(String message) {}
+            });
+            previewEngine.attachView(previewPlayerView);
+        }
+        previewChannelId = channel.id;
+        previewEngine.play(channel.streamUrl);
     }
 
     // ── 🔍 Recherche — dialog avec saisie + résultats live ────────
@@ -127,6 +187,8 @@ protected void onResume() {
         etSearch.setHint("Tapez le nom de la chaîne…");
         etSearch.setSingleLine(true);
         etSearch.setTextSize(16f);
+        etSearch.setTextColor(0xFFFFFFFF);
+        etSearch.setHintTextColor(0xFFB8C0CC);
         layout.addView(etSearch);
 
         // Compteur résultats
@@ -704,6 +766,11 @@ private boolean isXtreamUrl(String url) {
 
     private void openPlayer(ChannelEntity ch) {
         saveRecent(ch.id);
+        previewHandler.removeCallbacks(startPreview);
+        long startPosition = ch.contentType != ChannelEntity.TYPE_LIVE
+            && previewEngine != null && previewChannelId == ch.id
+            ? previewEngine.getPosition() : 0;
+        if (previewEngine != null) previewEngine.pause();
         Intent i = new Intent(this, TvPlayerActivity.class);
         i.putExtra(TvPlayerActivity.EXTRA_ID,    ch.id);
         i.putExtra(TvPlayerActivity.EXTRA_NAME,  ch.name);
@@ -711,6 +778,27 @@ private boolean isXtreamUrl(String url) {
         i.putExtra(TvPlayerActivity.EXTRA_TYPE,  ch.contentType);
         i.putExtra(TvPlayerActivity.EXTRA_GROUP, ch.groupTitle);
         i.putExtra(TvPlayerActivity.EXTRA_ORDER, ch.sortOrder);
+        if (startPosition > 0) i.putExtra(TvPlayerActivity.EXTRA_START_POSITION, startPosition);
         startActivity(i);
+    }
+
+    @Override protected void onPause() {
+        if (previewEngine != null) previewEngine.pause();
+        super.onPause();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (pendingPreview != null) {
+            previewHandler.removeCallbacks(startPreview);
+            previewHandler.postDelayed(startPreview, 350);
+        }
+    }
+
+    @Override protected void onDestroy() {
+        previewHandler.removeCallbacksAndMessages(null);
+        if (previewPlayerView != null) previewPlayerView.setPlayer(null);
+        if (previewEngine != null) { previewEngine.release(); previewEngine = null; }
+        super.onDestroy();
     }
 }

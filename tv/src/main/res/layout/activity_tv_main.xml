@@ -1,16 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/wise_bg">
 
-    <FrameLayout
-        android:id="@+id/browse_fragment"
+    <ImageView android:id="@+id/tv_backdrop"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:focusable="false"
-        android:nextFocusUp="@id/btn_search"
-        android:paddingTop="68dp"/>
+        android:scaleType="centerCrop"
+        android:alpha="0.16"
+        android:visibility="gone"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginTop="68dp"
+        android:orientation="horizontal">
+
+        <FrameLayout
+            android:id="@+id/browse_fragment"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.68"
+            android:focusable="false"
+            android:nextFocusUp="@id/btn_search"/>
+
+        <LinearLayout
+            android:id="@+id/tv_preview_panel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.32"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="#CC0A0A0F">
+
+            <androidx.media3.ui.PlayerView
+                android:id="@+id/tv_preview_player"
+                android:layout_width="match_parent"
+                android:layout_height="190dp"
+                android:focusable="false"
+                app:use_controller="false"
+                app:resize_mode="zoom"/>
+
+            <TextView
+                android:id="@+id/tv_preview_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="Sélectionnez une chaîne"
+                android:textColor="@color/white"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:maxLines="2"
+                android:ellipsize="end"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Aperçu de la sélection"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp"/>
+        </LinearLayout>
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/top_bar"
