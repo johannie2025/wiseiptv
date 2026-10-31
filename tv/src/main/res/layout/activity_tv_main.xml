@@ -173,3 +173,5 @@
             android:visibility="gone"/>
     </LinearLayout>
 </FrameLayout>
+</LinearLayout>
+</FrameLayout>
