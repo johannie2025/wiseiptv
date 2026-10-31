@@ -171,6 +171,5 @@
             android:layout_marginStart="8dp"
             android:indeterminateTint="@color/wise_red"
             android:visibility="gone"/>
- 
-</LinearLayout>
+    </LinearLayout>
 </FrameLayout>
