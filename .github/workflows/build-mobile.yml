@@ -1,3 +1,4 @@
+            W Design — +240 222 886 007
 name: Build Wise IPTV — Mobile APK
 
 on:
@@ -96,7 +97,7 @@ jobs:
           body: |
             ## Wise IPTV Mobile ${{ github.ref_name }}
             **APK Phone / Tablette Android**
-            W Design — +240 555 445 514
+            W Design — +240 222 886 007
 
             | Fichier | Usage |
             |---|---|

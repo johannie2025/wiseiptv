@@ -1,3 +1,4 @@
+            **W Design — +240 222 886 007 (WhatsApp)**
 name: Build Wise IPTV — Release (Mobile + TV)
 
 on:
@@ -264,7 +265,7 @@ jobs:
           name: 'Wise IPTV ${{ github.ref_name }}'
           body: |
             ## Wise IPTV ${{ github.ref_name }}
-            **W Design — +240 555 445 514 (WhatsApp)**
+            **W Design — +240 222 886 007 (WhatsApp)**
 
             | Fichier | Cible | Usage |
             |---|---|---|
