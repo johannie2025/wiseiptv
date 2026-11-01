@@ -15,7 +15,7 @@
     <LinearLayout android:id="@+id/osd"
         android:layout_width="match_parent" android:layout_height="wrap_content"
         android:orientation="vertical" android:alpha="0"
-        android:background="#AA000000" android:padding="16dp">
+        android:background="@drawable/bg_osd_bar_top" android:padding="24dp">
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal">
@@ -32,11 +32,11 @@
             android:orientation="horizontal" android:layout_marginTop="4dp">
             <TextView android:id="@+id/tv_group"
                 android:layout_width="0dp" android:layout_height="wrap_content"
-                android:layout_weight="1" android:textColor="#FFAAAAFF"
+                android:layout_weight="1" android:textColor="@color/wise_blue_light"
                 android:textSize="14sp"/>
             <TextView android:id="@+id/tv_status"
                 android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:textColor="#FFFFAA00" android:textSize="14sp" android:visibility="gone"/>
+                android:textColor="#FFFFC857" android:textSize="14sp" android:visibility="gone"/>
         </LinearLayout>
 
         <!-- Hint zapping -->
