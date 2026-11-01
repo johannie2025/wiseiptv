@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scrollbars="none" android:clipToPadding="false"
+        android:paddingBottom="80dp">
+        <LinearLayout android:id="@+id/acc_content"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="16dp">
+
+            <TextView android:id="@+id/acc_title"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Mon compte" style="@style/Wise.Title"
+                android:layout_marginTop="6dp" android:layout_marginBottom="14dp"/>
+
+            <!-- Alerte expiration -->
+            <LinearLayout android:id="@+id/banner_expiry"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:background="@drawable/bg_alert"
+                android:padding="14dp" android:layout_marginBottom="14dp"
+                android:visibility="gone">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:gravity="center_vertical">
+                    <ImageView android:layout_width="24dp" android:layout_height="24dp"
+                        android:src="@drawable/ic_warning" android:tint="#FFD54F"
+                        android:contentDescription="@null"/>
+                    <TextView android:id="@+id/tv_alert_text"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:layout_marginStart="10dp"
+                        android:textColor="@color/white" android:textSize="14sp" android:textStyle="bold"/>
+                </LinearLayout>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Renouvelez maintenant pour éviter toute interruption de service."
+                    android:textColor="#F2C9D0" android:textSize="12sp"
+                    android:layout_marginTop="6dp" android:layout_marginBottom="12dp"/>
+                <androidx.appcompat.widget.AppCompatButton android:id="@+id/btn_renew"
+                    style="@style/Wise.Button"
+                    android:layout_width="match_parent" android:layout_height="46dp"
+                    android:text="Renouveler maintenant" android:background="@drawable/btn_pink"/>
+            </LinearLayout>
+
+            <!-- Profil -->
+            <LinearLayout android:id="@+id/card_profile"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical"
+                android:background="@drawable/bg_card" android:padding="16dp"
+                android:layout_marginBottom="12dp">
+                <TextView android:id="@+id/tv_avatar"
+                    android:layout_width="58dp" android:layout_height="58dp"
+                    android:gravity="center" android:background="@drawable/bg_avatar"
+                    android:text="W" android:textColor="@color/white"
+                    android:textStyle="bold" android:textSize="24sp"/>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical"
+                    android:layout_marginStart="14dp">
+                    <TextView android:id="@+id/tv_name"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:text="Appareil Wise IPTV" android:textColor="@color/white"
+                        android:textSize="17sp" android:textStyle="bold"
+                        android:maxLines="1" android:ellipsize="end"/>
+                    <TextView android:id="@+id/tv_status_badge"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp" android:text="Non activé"
+                        android:background="@drawable/bg_badge_blue" android:textColor="@color/white"
+                        android:textSize="11sp" android:textStyle="bold"
+                        android:paddingStart="10dp" android:paddingEnd="10dp"
+                        android:paddingTop="3dp" android:paddingBottom="3dp"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Abonnement -->
+            <LinearLayout android:id="@+id/card_sub"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical" android:background="@drawable/bg_card"
+                android:padding="16dp" android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:gravity="center_vertical">
+                    <ImageView android:id="@+id/img_sub_state"
+                        android:layout_width="22dp" android:layout_height="22dp"
+                        android:src="@drawable/ic_check_circle" android:tint="@color/wise_green"
+                        android:contentDescription="@null"/>
+                    <TextView android:id="@+id/tv_acc_status"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp" android:text="Abonnement"
+                        android:textColor="@color/white" android:textSize="15sp" android:textStyle="bold"/>
+                </LinearLayout>
+                <TextView android:id="@+id/tv_acc_expiry"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp" android:textColor="@color/text_secondary"
+                    android:textSize="13sp"/>
+                <TextView android:id="@+id/tv_acc_days"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp" android:textColor="@color/white"
+                    android:textSize="13sp"/>
+                <ProgressBar android:id="@+id/acc_progress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent" android:layout_height="8dp"
+                    android:layout_marginTop="12dp" android:max="100" android:progress="0"
+                    android:progressDrawable="@drawable/progress_gradient"/>
+            </LinearLayout>
+
+            <!-- Statistiques -->
+            <LinearLayout android:id="@+id/stats_row"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+                    android:background="@drawable/bg_card" android:padding="12dp"
+                    android:layout_marginEnd="6dp">
+                    <TextView android:id="@+id/stat_live" android:text="0"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
+                    <TextView android:text="Chaînes" style="@style/Wise.Label"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+                    android:background="@drawable/bg_card" android:padding="12dp"
+                    android:layout_marginStart="3dp" android:layout_marginEnd="3dp">
+                    <TextView android:id="@+id/stat_films" android:text="0"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
+                    <TextView android:text="Films" style="@style/Wise.Label"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+                    android:background="@drawable/bg_card" android:padding="12dp"
+                    android:layout_marginStart="3dp" android:layout_marginEnd="3dp">
+                    <TextView android:id="@+id/stat_series" android:text="0"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
+                    <TextView android:text="Séries" style="@style/Wise.Label"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                </LinearLayout>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+                    android:background="@drawable/bg_card" android:padding="12dp"
+                    android:layout_marginStart="6dp">
+                    <TextView android:id="@+id/stat_favs" android:text="0"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
+                    <TextView android:text="Favoris" style="@style/Wise.Label"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Device key -->
+            <LinearLayout android:id="@+id/card_key"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical"
+                android:background="@drawable/bg_card" android:padding="14dp"
+                android:layout_marginBottom="12dp">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                    android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:text="Device Key" style="@style/Wise.Label"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
+                    <TextView android:id="@+id/tv_acc_key"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/wise_blue_light" android:textSize="20sp"
+                        android:fontFamily="monospace" android:letterSpacing="0.15"
+                        android:textStyle="bold"/>
+                </LinearLayout>
+                <androidx.appcompat.widget.AppCompatButton android:id="@+id/btn_acc_copy"
+                    style="@style/Wise.Button"
+                    android:layout_width="wrap_content" android:layout_height="40dp"
+                    android:paddingStart="18dp" android:paddingEnd="18dp"
+                    android:text="Copier" android:textSize="13sp"
+                    android:background="@drawable/btn_secondary"/>
+            </LinearLayout>
+
+            <!-- Aide -->
+            <include android:id="@+id/row_help" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_nav"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:background="@color/wise_surface"
+        android:elevation="10dp"
+        app:menu="@menu/bottom_nav_menu" app:labelVisibilityMode="labeled"
+        app:itemIconTint="@color/nav_selector" app:itemTextColor="@color/nav_selector"/>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

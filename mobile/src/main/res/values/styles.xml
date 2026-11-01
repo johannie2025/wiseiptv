@@ -1,16 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.WiseIPTV" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.WiseIPTV" parent="Theme.MaterialComponents.NoActionBar">
         <item name="colorPrimary">@color/wise_blue</item>
+        <item name="colorPrimaryVariant">@color/wise_blue_dark</item>
         <item name="colorSecondary">@color/wise_red</item>
         <item name="android:colorBackground">@color/wise_bg</item>
         <item name="android:textColor">@color/white</item>
-        <item name="android:windowBackground">@color/wise_bg</item>
-        <item name="android:statusBarColor">@color/wise_bg</item>
+        <item name="android:windowBackground">@drawable/bg_app_gradient</item>
+        <item name="android:statusBarColor">@color/wise_bg_top</item>
+        <item name="android:navigationBarColor">@color/wise_bg_bottom</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:alertDialogTheme">@style/Wise.Dialog</item>
     </style>
+
+    <style name="Theme.WiseIPTV.Splash" parent="Theme.WiseIPTV">
+        <item name="android:windowBackground">@drawable/bg_app_gradient</item>
+        <item name="android:windowFullscreen">false</item>
+    </style>
+
     <style name="Theme.WiseIPTV.Fullscreen">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
+    <style name="Wise.Dialog" parent="android:Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/bg_card</item>
+        <item name="android:colorAccent">@color/wise_blue_light</item>
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/text_secondary</item>
+    </style>
+
+    <style name="Wise.Title">
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="Wise.Label">
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+    <style name="Wise.Button" parent="Widget.AppCompat.Button">
+        <item name="android:textColor">@color/white</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:minHeight">0dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
     </style>
 </resources>
