@@ -30,6 +30,11 @@
         <item name="android:textColorSecondary">@color/text_secondary</item>
     </style>
 
+    <!-- Style racine Wise requis par les layouts mobiles -->
+    <style name="Wise">
+        <item name="android:textColor">@color/white</item>
+    </style>
+
     <style name="Wise.Title">
         <item name="android:textColor">@color/white</item>
         <item name="android:textSize">22sp</item>
