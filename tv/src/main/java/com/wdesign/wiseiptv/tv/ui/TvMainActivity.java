@@ -782,22 +782,26 @@ private boolean isXtreamUrl(String url) {
         startActivity(i);
     }
 
-    @Override
-protected void onResume() {
-    super.onResume();
-    if (previewEngine != null) {
-        previewEngine.pause();
+@Override
+    protected void onResume() {
+        super.onResume();
+        if (previewEngine != null) {
+            previewEngine.pause();
+        }
+        if (pendingPreview != null) {
+            previewHandler.removeCallbacks(startPreview);
+            previewHandler.postDelayed(startPreview, 350);
+        }
     }
-    if (pendingPreview != null) {
-        previewHandler.removeCallbacks(startPreview);
-        previewHandler.postDelayed(startPreview, 350);
-    }
-}
 
-    @Override protected void onDestroy() {
+    @Override
+    protected void onDestroy() {
         previewHandler.removeCallbacksAndMessages(null);
         if (previewPlayerView != null) previewPlayerView.setPlayer(null);
-        if (previewEngine != null) { previewEngine.release(); previewEngine = null; }
+        if (previewEngine != null) {
+            previewEngine.release();
+            previewEngine = null;
+        }
         super.onDestroy();
     }
 }
