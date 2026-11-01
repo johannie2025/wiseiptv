@@ -782,17 +782,7 @@ private boolean isXtreamUrl(String url) {
         startActivity(i);
     }
 
-@Override
-    protected void onResume() {
-        super.onResume();
-        if (previewEngine != null) {
-            previewEngine.pause();
-        }
-        if (pendingPreview != null) {
-            previewHandler.removeCallbacks(startPreview);
-            previewHandler.postDelayed(startPreview, 350);
-        }
-    }
+
 
     @Override
     protected void onDestroy() {
