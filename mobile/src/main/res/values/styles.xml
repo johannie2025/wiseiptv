@@ -10,7 +10,7 @@
         <item name="android:statusBarColor">@color/wise_bg_top</item>
         <item name="android:navigationBarColor">@color/wise_bg_bottom</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:alertDialogTheme">@style/Wise.Dialog</item>
+        <item name="android:alertDialogTheme">@style/Theme.WiseIPTV.Dialog</item>
     </style>
 
     <style name="Theme.WiseIPTV.Splash" parent="Theme.WiseIPTV">
@@ -23,7 +23,7 @@
         <item name="android:windowBackground">@android:color/black</item>
     </style>
 
-    <style name="Wise.Dialog" parent="android:Theme.Material.Dialog.Alert">
+    <style name="Theme.WiseIPTV.Dialog" parent="android:Theme.Material.Dialog.Alert">
         <item name="android:windowBackground">@drawable/bg_card</item>
         <item name="android:colorAccent">@color/wise_blue_light</item>
         <item name="android:textColorPrimary">@color/white</item>
@@ -35,10 +35,12 @@
         <item name="android:textSize">22sp</item>
         <item name="android:textStyle">bold</item>
     </style>
+    
     <style name="Wise.Label">
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:textSize">12sp</item>
     </style>
+    
     <style name="Wise.Button" parent="Widget.AppCompat.Button">
         <item name="android:textColor">@color/white</item>
         <item name="android:textSize">15sp</item>
