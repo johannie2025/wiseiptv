@@ -30,18 +30,18 @@
         <item name="android:textColorSecondary">@color/text_secondary</item>
     </style>
 
-    <style name="Widget.Wise.Title" parent="android:Widget">
+    <style name="Wise.Title">
         <item name="android:textColor">@color/white</item>
         <item name="android:textSize">22sp</item>
         <item name="android:textStyle">bold</item>
     </style>
     
-    <style name="Widget.Wise.Label" parent="android:Widget">
+    <style name="Wise.Label">
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:textSize">12sp</item>
     </style>
     
-    <style name="Widget.Wise.Button" parent="Widget.AppCompat.Button">
+    <style name="Wise.Button" parent="Widget.AppCompat.Button">
         <item name="android:textColor">@color/white</item>
         <item name="android:textSize">15sp</item>
         <item name="android:textStyle">bold</item>
