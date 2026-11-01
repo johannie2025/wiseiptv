@@ -15,17 +15,24 @@
         android:theme="@style/Theme.WiseIPTV"
         android:usesCleartextTraffic="true">
 
-        <!-- PREMIER ÉCRAN : Activation -->
+        <!-- PREMIER ÉCRAN : Splash animé → Activation -->
         <activity
-            android:name=".ui.ActivationActivity"
+            android:name=".ui.SplashActivity"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:theme="@style/Theme.WiseIPTV.Splash"
             android:configChanges="orientation|keyboardHidden|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Activation (device key + statut) -->
+        <activity
+            android:name=".ui.ActivationActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|keyboardHidden|screenSize"/>
 
         <!-- Écran principal (chaînes) -->
         <activity
@@ -44,6 +51,8 @@
             android:theme="@style/Theme.WiseIPTV.Fullscreen"/>
 
         <activity android:name=".ui.SettingsActivity" android:exported="false"/>
+        <activity android:name=".ui.AccountActivity" android:exported="false"/>
+        <activity android:name=".ui.AboutActivity" android:exported="false"/>
 
     </application>
 

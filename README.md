@@ -127,3 +127,15 @@ http://stream.url/live.m3u8
 
 **W Design**
 WhatsApp : +240 222 886 007
+
+---
+
+## Mise à jour design (1er novembre 2026)
+
+Nouveau design appliqué aux modules `mobile` et `tv` :
+
+- **Splash animé** (logo + halo + barre de chargement) → **écran d'activation** redessiné → accueil.
+- Palette bleu nuit (`colors.xml`), cartes arrondies, boutons dégradés, icônes vectorielles.
+- **Mobile** : accueil (salutation, carte d'abonnement, recherche, onglets en pastilles), grille de chaînes, lecteur (OSD), Mon compte (alerte d'expiration, statistiques), Paramètres, À propos, barre de navigation 5 onglets.
+- **TV** : splash, activation, accueil (pastille d'abonnement, focus animé), cartes chaînes, OSD du lecteur.
+- Animations : module `core/util/Fx.java` (entrées en cascade, pulsation, zoom au focus, compteurs) — animations natives Android, aucune dépendance ajoutée, donc les workflows GitHub Actions restent inchangés.

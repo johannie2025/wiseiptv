@@ -74,6 +74,8 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
         osdTop        = findViewById(R.id.osd_top);
             zapControls  = findViewById(R.id.osd_zap_controls);
         tvChannelName.setText(channelName);
+        findViewById(R.id.tv_live_badge).setVisibility(
+            contentType == ChannelEntity.TYPE_LIVE ? View.VISIBLE : View.GONE);
         btnBack.setOnClickListener(v -> finish());
             btnPrevious.setOnClickListener(v -> zapChannel(-1));
             btnNext.setOnClickListener(v -> zapChannel(1));
@@ -158,6 +160,8 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
                 groupTitle = target.groupTitle;
                 sortOrder = target.sortOrder;
                 contentType = target.contentType;
+                findViewById(R.id.tv_live_badge).setVisibility(
+                    contentType == ChannelEntity.TYPE_LIVE ? View.VISIBLE : View.GONE);
                 rememberRecentChannel();
                 tvChannelName.animate().alpha(0).setDuration(100).withEndAction(() -> {
                     tvChannelName.setText(channelName);
@@ -197,7 +201,11 @@ public class PlayerActivity extends AppCompatActivity implements PlayerEngine.Li
         Executors.newSingleThreadExecutor().execute(() -> db.channelDao().setFavorite(channelId, isFav));
     }
     private void updateFavIcon() {
-        btnFav.setImageResource(isFav ? android.R.drawable.btn_star_big_on : android.R.drawable.btn_star_big_off);
+        btnFav.setImageResource(isFav ? R.drawable.ic_favorite : R.drawable.ic_favorite_border);
+        btnFav.animate().cancel();
+        btnFav.setScaleX(0.7f); btnFav.setScaleY(0.7f);
+        btnFav.animate().scaleX(1f).scaleY(1f).setDuration(260)
+            .setInterpolator(new android.view.animation.OvershootInterpolator(3f)).start();
     }
     @Override protected void onStop() { super.onStop(); if (engine != null) engine.pause(); }
     @Override protected void onDestroy() {

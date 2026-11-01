@@ -1,25 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    
     <item android:state_focused="true">
         <shape android:shape="rectangle">
-            <solid android:color="#CCE50914"/>
-            <corners android:radius="8dp"/>
+            <gradient android:angle="0" android:startColor="#5BB0FF" android:endColor="#2F8CF0"/>
+            <corners android:radius="22dp"/>
+            <stroke android:width="2dp" android:color="#FFFFFF"/>
         </shape>
     </item>
-    
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
-            <solid android:color="#CC1A6FBF"/>
-            <corners android:radius="8dp"/>
+            <solid android:color="#CC1F7AE0"/>
+            <corners android:radius="22dp"/>
         </shape>
     </item>
-    
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#441A3D6E"/>
-            <corners android:radius="8dp"/>
+            <solid android:color="@color/wise_card"/>
+            <corners android:radius="22dp"/>
+            <stroke android:width="1dp" android:color="@color/wise_card_stroke"/>
         </shape>
     </item>
-    
 </selector>

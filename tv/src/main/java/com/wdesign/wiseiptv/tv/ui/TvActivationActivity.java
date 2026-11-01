@@ -9,6 +9,7 @@ import android.view.View;
 import android.widget.*;
 import androidx.fragment.app.FragmentActivity;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
+import com.wdesign.wiseiptv.core.util.Fx;
 import com.wdesign.wiseiptv.tv.R;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -28,6 +29,7 @@ public class TvActivationActivity extends FragmentActivity {
     private Button      btnCheck, btnAccess;
     private ProgressBar progressBar;
     private ImageView   imgLogo;
+    private android.animation.ObjectAnimator statusPulse;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -59,6 +61,11 @@ public class TvActivationActivity extends FragmentActivity {
         btnCheck.setOnClickListener(v -> checkActivation(false));
         btnAccess.setOnClickListener(v -> checkActivation(true));
         btnCheck.requestFocus();
+
+        // Animations d'entrée + zoom au focus (télécommande)
+        Fx.stagger(60, 110, findViewById(R.id.act_left), findViewById(R.id.act_right));
+        Fx.focusZoom(btnCheck, 1.04f);
+        Fx.focusZoom(btnAccess, 1.04f);
 
         String saved = getPrefs().getString("status", "");
         if ("EXPIRED".equals(saved) || "DISABLED".equals(saved)) showInactive(saved);
@@ -102,6 +109,7 @@ public class TvActivationActivity extends FragmentActivity {
         tvStatus.setText("✅ ACTIVÉ"); tvStatus.setTextColor(0xFF4CAF50);
         tvStatusDetail.setText("Abonnement actif");
         cardProvider.setVisibility(View.VISIBLE);
+        Fx.pop(cardProvider);
         if (!r.dnsServers.isEmpty()) tvProvider.setText("Provider : " + r.dnsServers.get(0).url);
         tvLogin.setText("Login : " + r.login);
         tvPassword.setText("Mot de passe : " + r.password);
@@ -204,7 +212,20 @@ public class TvActivationActivity extends FragmentActivity {
         finish();
     }
 
+    @Override protected void onDestroy() {
+        if (statusPulse != null) statusPulse.cancel();
+        super.onDestroy();
+    }
+
     private void setLoading(boolean on) {
+        if (tvStatus != null) {
+            if (on) {
+                if (statusPulse == null) statusPulse = Fx.pulse(tvStatus, 1.04f, 700);
+            } else if (statusPulse != null) {
+                statusPulse.cancel(); statusPulse = null;
+                tvStatus.setScaleX(1f); tvStatus.setScaleY(1f); tvStatus.setAlpha(1f);
+            }
+        }
         if (progressBar != null) progressBar.setVisibility(on ? View.VISIBLE : View.GONE);
         if (btnCheck != null) {
             btnCheck.setEnabled(!on);

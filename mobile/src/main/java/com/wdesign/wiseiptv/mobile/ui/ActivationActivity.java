@@ -10,6 +10,7 @@ import android.view.View;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
+import com.wdesign.wiseiptv.core.util.Fx;
 import com.wdesign.wiseiptv.mobile.R;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -39,6 +40,7 @@ public class ActivationActivity extends AppCompatActivity {
     private ProgressBar progressBar;
 
     private boolean isCheckInProgress = false;
+    private android.animation.ObjectAnimator statusPulse;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,6 +66,11 @@ public class ActivationActivity extends AppCompatActivity {
         btnAccess      = findViewById(R.id.btn_access);
         btnCopy        = findViewById(R.id.btn_copy_key);
         progressBar    = findViewById(R.id.progress_bar);
+
+        // Animations d'entrée (nouveau design)
+        Fx.stagger(60, 90, findViewById(R.id.act_header), findViewById(R.id.card_status),
+            findViewById(R.id.card_key), findViewById(R.id.act_actions));
+        Fx.pressable(btnCheck); Fx.pressable(btnAccess); Fx.pressable(btnCopy);
 
         String key = DeviceSecurity.getOrCreateKey(this);
         tvDeviceKey.setText(key);
@@ -200,6 +207,7 @@ public class ActivationActivity extends AppCompatActivity {
         tvStatus.setTextColor(0xFF4CAF50);
         tvStatusDetail.setText("Votre abonnement est actif");
         cardProvider.setVisibility(View.VISIBLE);
+        Fx.pop(cardProvider);
         tvLogin.setText("Login : " + r.login);
         tvPassword.setText("Mot de passe : " + r.password);
         tvExpiry.setText("Expire le : " + r.expiresAt);
@@ -295,8 +303,19 @@ public class ActivationActivity extends AppCompatActivity {
         return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
+    @Override protected void onDestroy() {
+        if (statusPulse != null) statusPulse.cancel();
+        super.onDestroy();
+    }
+
     private void setLoading(boolean on) {
         if (progressBar == null || btnCheck == null) return;
+        if (on) {
+            if (statusPulse == null) statusPulse = Fx.pulse(tvStatus, 1.04f, 700);
+        } else if (statusPulse != null) {
+            statusPulse.cancel(); statusPulse = null;
+            tvStatus.setScaleX(1f); tvStatus.setScaleY(1f); tvStatus.setAlpha(1f);
+        }
         progressBar.setVisibility(on ? View.VISIBLE : View.GONE);
         btnCheck.setEnabled(!on);
         btnCheck.setText(on ? "Vérification…" : "🔄 Vérifier l'activation");

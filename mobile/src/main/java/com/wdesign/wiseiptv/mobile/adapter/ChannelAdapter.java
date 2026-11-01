@@ -32,7 +32,7 @@ public class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
         h.tvName.setText(ch.name);
         h.tvLive.setVisibility(ch.contentType == ChannelEntity.TYPE_LIVE ? View.VISIBLE : View.GONE);
         if (ch.logoUrl != null && !ch.logoUrl.isEmpty()) {
-            Glide.with(h.imgLogo).load(ch.logoUrl).centerCrop()
+            Glide.with(h.imgLogo).load(ch.logoUrl).fitCenter()
                 .placeholder(R.drawable.ic_channel_placeholder).into(h.imgLogo);
         } else {
             h.imgLogo.setImageResource(R.drawable.ic_channel_placeholder);
@@ -49,7 +49,7 @@ public class ChannelAdapter extends RecyclerView.Adapter<ChannelAdapter.VH> {
     static class VH extends RecyclerView.ViewHolder {
         ImageView imgLogo; TextView tvName, tvLive;
         boolean hasEntered;
-        VH(View v) { super(v); imgLogo = v.findViewById(R.id.img_logo);
+        VH(View v) { super(v); com.wdesign.wiseiptv.core.util.Fx.pressable(v); imgLogo = v.findViewById(R.id.img_logo);
             tvName = v.findViewById(R.id.tv_name); tvLive = v.findViewById(R.id.tv_live); }
     }
 }

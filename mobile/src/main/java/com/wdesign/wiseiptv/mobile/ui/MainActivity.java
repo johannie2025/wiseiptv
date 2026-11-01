@@ -18,6 +18,8 @@ import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.util.Fx;
+import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
 import com.wdesign.wiseiptv.mobile.R;
 import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
 import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
@@ -51,6 +53,11 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     public static final String EXTRA_ACT_DNS_URLS    = EXTRA_DNS_URLS;
     public static final String EXTRA_ACT_DNS_EPG_URLS = EXTRA_DNS_EPGS;
 
+    // Navigation / actions depuis les autres écrans (Paramètres, barre du bas)
+    public static final String EXTRA_NAV        = "nav_target";
+    public static final String EXTRA_OPEN_ADD   = "open_add_playlist";
+    public static final String EXTRA_FORCE_SYNC = "force_sync";
+
     private static final String TAG   = "MainActivity";
     private static final String PREFS = "wise_activation";
 
@@ -67,6 +74,8 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private FrameLayout            homePreviewContainer;
     private PlayerView             homePreviewView;
     private TextView               tvHomePreviewName;
+    private View                   cardSubscription;
+    private TextView               tvGreeting, tvSubTitle, tvSubExpiry, tvSubDays, tvAvatar;
     private PlayerEngine           homePreviewEngine;
     private List<ChannelEntity>    homeChannels = new java.util.ArrayList<>();
     private long                   previewChannelId = -1;
@@ -100,6 +109,15 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         homePreviewContainer = findViewById(R.id.home_preview_container);
         homePreviewView = findViewById(R.id.home_preview_player);
         tvHomePreviewName = findViewById(R.id.tv_home_preview_name);
+        cardSubscription  = findViewById(R.id.card_subscription);
+        tvGreeting        = findViewById(R.id.tv_greeting);
+        tvSubTitle        = findViewById(R.id.tv_sub_title);
+        tvSubExpiry       = findViewById(R.id.tv_sub_expiry);
+        tvSubDays         = findViewById(R.id.tv_sub_days);
+        tvAvatar          = findViewById(R.id.tv_avatar);
+        tvAvatar.setOnClickListener(v -> startActivity(new Intent(this, AccountActivity.class)));
+        cardSubscription.setOnClickListener(v -> startActivity(new Intent(this, AccountActivity.class)));
+        Fx.pressable(cardSubscription);
 
         adapter = new ChannelAdapter(this);
         int gridColumns = getSharedPreferences("wise_display", MODE_PRIVATE)
@@ -122,6 +140,70 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         setupSearch();
         setupBottomNav();
         startBackgroundSync();
+        handleExtras(getIntent());
+        Fx.stagger(40, 70, findViewById(R.id.header_row), cardSubscription, searchView, tabLayout);
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleExtras(intent);
+    }
+
+    /** Actions demandées par les autres écrans (barre du bas, Paramètres). */
+    private void handleExtras(Intent in) {
+        if (in == null) return;
+        if (in.getBooleanExtra(EXTRA_FORCE_SYNC, false)) {
+            in.removeExtra(EXTRA_FORCE_SYNC);
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong("last_sync_ts", 0).apply();
+            startBackgroundSync();
+        }
+        if (in.getBooleanExtra(EXTRA_OPEN_ADD, false)) {
+            in.removeExtra(EXTRA_OPEN_ADD);
+            showAddPlaylistDialog();
+        }
+        int nav = in.getIntExtra(EXTRA_NAV, 0);
+        if (nav != 0) {
+            in.removeExtra(EXTRA_NAV);
+            if (nav == R.id.nav_live) openTab(1);
+            else if (nav == R.id.nav_fav) openTab(4);
+            else if (nav == R.id.nav_home) { showRecentHome(); }
+        }
+    }
+
+    /** Ouvre un onglet (0=Tout 1=Live 2=Films 3=Séries 4=Favoris). */
+    private void openTab(int pos) {
+        TabLayout.Tab t = tabLayout.getTabAt(pos);
+        if (t != null && !t.isSelected()) { t.select(); return; }
+        currentTab = pos;
+        showingHome = false;
+        showCategoryList();
+        observeCurrentTab();
+    }
+
+    /** Carte "Abonnement" + salutation (données du cache d'activation). */
+    private void refreshSubscriptionCard() {
+        SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_MOBILE);
+        if (si == null) {
+            tvGreeting.setText("Bonjour 👋");
+            tvAvatar.setText("W");
+            cardSubscription.setVisibility(View.GONE);
+            return;
+        }
+        String name = si.displayName();
+        tvGreeting.setText(name.isEmpty() ? "Bonjour 👋" : "Bonjour " + name + " 👋");
+        tvAvatar.setText(si.initial());
+        tvSubExpiry.setText("Expire le : " + si.formattedExpiry());
+        boolean soon = si.isExpiringSoon(5);
+        if (!si.active) {
+            tvSubTitle.setText("Abonnement expiré");
+            tvSubDays.setText("Expiré");
+        } else {
+            tvSubTitle.setText(soon ? "Expire bientôt" : "Abonnement Actif");
+            tvSubDays.setText(si.daysLeft + (si.daysLeft > 1 ? " jours" : " jour"));
+        }
+        cardSubscription.setBackgroundResource(soon ? R.drawable.bg_alert : R.drawable.bg_card_hero);
+        if (showingHome) cardSubscription.setVisibility(View.VISIBLE);
     }
 
     // ── Sync background ───────────────────────────────────────────
@@ -302,7 +384,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 observeCurrentTab();
             }
             @Override public void onTabUnselected(TabLayout.Tab t) {}
-            @Override public void onTabReselected(TabLayout.Tab t) {}
+            @Override public void onTabReselected(TabLayout.Tab t) { onTabSelected(t); }
         });
     }
 
@@ -325,6 +407,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     private void showCategoryList() {
         homePreviewContainer.setVisibility(View.GONE);
+        cardSubscription.setVisibility(View.GONE);
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) rvChannels.getLayoutParams();
         params.topMargin = 0;
         rvChannels.setLayoutParams(params);
@@ -333,6 +416,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     private void showRecentHome() {
         showingHome = true;
+        refreshSubscriptionCard();
         homePreviewContainer.setVisibility(View.VISIBLE);
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) rvChannels.getLayoutParams();
         params.topMargin = Math.round(168 * getResources().getDisplayMetrics().density);
@@ -426,6 +510,9 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             searchText.setTextColor(getResources().getColor(R.color.white));
             searchText.setHintTextColor(0xFFB8C0CC);
         }
+        int plateId = getResources().getIdentifier("search_plate", "id", "android");
+        View plate = searchView.findViewById(plateId);
+        if (plate != null) plate.setBackgroundColor(0x00000000);
         searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
             @Override public boolean onQueryTextSubmit(String q) { return false; }
             @Override public boolean onQueryTextChange(String q) {
@@ -467,8 +554,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         bottomNav.setOnItemSelectedListener(item -> {
             int id = item.getItemId();
             if      (id == R.id.nav_home)    { showRecentHome(); return true; }
-            else if (id == R.id.nav_add)     { showAddPlaylistDialog(); return true; }
-            else if (id == R.id.nav_settings){ startActivity(new Intent(this, SettingsActivity.class)); return true; }
+            else if (id == R.id.nav_live)    { openTab(1); return true; }
+            else if (id == R.id.nav_fav)     { openTab(4); return true; }
+            else if (id == R.id.nav_account) {
+                startActivity(new Intent(this, AccountActivity.class));
+                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+                return false;
+            }
+            else if (id == R.id.nav_settings){
+                startActivity(new Intent(this, SettingsActivity.class));
+                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+                return false;
+            }
             return false;
         });
     }
@@ -541,6 +638,14 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     @Override protected void onResume() {
         super.onResume();
+        int cols = Math.max(2, Math.min(5, getSharedPreferences("wise_display", MODE_PRIVATE)
+            .getInt("grid_columns", 3)));
+        if (gridLayoutManager.getSpanCount() != cols) gridLayoutManager.setSpanCount(cols);
+        int navId = showingHome ? R.id.nav_home
+            : currentTab == 1 ? R.id.nav_live
+            : currentTab == 4 ? R.id.nav_fav : R.id.nav_home;
+        android.view.MenuItem navItem = bottomNav.getMenu().findItem(navId);
+        if (navItem != null) navItem.setChecked(true);
         if (showingHome) showRecentHome(); else observeCurrentTab();
     }
 

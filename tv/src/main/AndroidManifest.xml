@@ -16,16 +16,21 @@
         android:theme="@style/Theme.WiseIPTV.TV"
         android:usesCleartextTraffic="true">
 
-        <!-- PREMIER ÉCRAN : Activation (device_key + statut) -->
-        <activity android:name=".ui.TvActivationActivity"
+        <!-- PREMIER ÉCRAN : Splash animé → Activation -->
+        <activity android:name=".ui.TvSplashActivity"
             android:exported="true"
-            android:launchMode="singleTask"
             android:configChanges="orientation|keyboardHidden|screenSize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Activation (device_key + statut) -->
+        <activity android:name=".ui.TvActivationActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|keyboardHidden|screenSize"/>
 
         <activity android:name=".ui.TvMainActivity"
             android:exported="false"

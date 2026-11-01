@@ -1,0 +1,150 @@
+package com.wdesign.wiseiptv.mobile.ui;
+
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.wdesign.wiseiptv.core.db.AppDatabase;
+import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
+import com.wdesign.wiseiptv.core.security.DeviceSecurity;
+import com.wdesign.wiseiptv.core.util.Fx;
+import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
+import com.wdesign.wiseiptv.mobile.R;
+import java.util.concurrent.Executors;
+
+/** Mon Compte : profil, abonnement, statistiques, clé appareil, alerte d'expiration. */
+public class AccountActivity extends AppCompatActivity {
+
+    private static final int ALERT_DAYS = 5;
+    private android.animation.ObjectAnimator renewPulse;
+
+    @Override protected void onCreate(Bundle s) {
+        super.onCreate(s);
+        setContentView(R.layout.activity_account);
+        NavHelper.bind(this, (BottomNavigationView) findViewById(R.id.bottom_nav), R.id.nav_account);
+
+        final String key = DeviceSecurity.getOrCreateKey(this);
+        ((TextView) findViewById(R.id.tv_acc_key)).setText(key);
+        findViewById(R.id.btn_acc_copy).setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
+            Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
+        });
+
+        SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_MOBILE);
+        bindSubscription(si, key);
+        bindHelp(key);
+        loadStats();
+
+        Fx.stagger(40, 70,
+            findViewById(R.id.acc_title), findViewById(R.id.banner_expiry),
+            findViewById(R.id.card_profile), findViewById(R.id.card_sub),
+            findViewById(R.id.stats_row), findViewById(R.id.card_key), findViewById(R.id.row_help));
+        Fx.pressable(findViewById(R.id.btn_renew));
+        Fx.pressable(findViewById(R.id.row_help));
+    }
+
+    private void bindSubscription(SubscriptionInfo si, String key) {
+        TextView tvName   = findViewById(R.id.tv_name);
+        TextView tvAvatar = findViewById(R.id.tv_avatar);
+        TextView badge    = findViewById(R.id.tv_status_badge);
+        TextView status   = findViewById(R.id.tv_acc_status);
+        TextView expiry   = findViewById(R.id.tv_acc_expiry);
+        TextView days     = findViewById(R.id.tv_acc_days);
+        ImageView state   = findViewById(R.id.img_sub_state);
+        ProgressBar bar   = findViewById(R.id.acc_progress);
+        View banner       = findViewById(R.id.banner_expiry);
+
+        if (si == null) {
+            status.setText("Aucun abonnement actif");
+            state.setImageResource(R.drawable.ic_warning);
+            state.setColorFilter(0xFFFFD54F);
+            expiry.setText("Communiquez votre Device Key à votre revendeur.");
+            days.setVisibility(View.GONE);
+            bar.setVisibility(View.GONE);
+            badge.setText("Non activé");
+            return;
+        }
+
+        String name = si.displayName();
+        tvName.setText(name.isEmpty() ? "Appareil Wise IPTV" : name);
+        tvAvatar.setText(si.initial());
+        expiry.setText("Expire le : " + si.formattedExpiry());
+
+        if (si.active) {
+            badge.setText("Actif");
+            badge.setBackgroundResource(R.drawable.bg_badge_green);
+            status.setText("Abonnement Actif");
+            days.setText("Jours restants : " + si.daysLeft + (si.daysLeft > 1 ? " jours" : " jour"));
+            Fx.progressTo(bar, si.remainingPercent(), 900);
+        } else {
+            badge.setText("Expiré");
+            badge.setBackgroundResource(R.drawable.bg_badge_live);
+            status.setText("Abonnement expiré");
+            state.setImageResource(R.drawable.ic_warning);
+            state.setColorFilter(0xFFFFD54F);
+            days.setText("Jours restants : 0");
+            bar.setProgress(0);
+        }
+
+        if (si.isExpiringSoon(ALERT_DAYS)) {
+            banner.setVisibility(View.VISIBLE);
+            TextView t = findViewById(R.id.tv_alert_text);
+            t.setText(si.active
+                ? "Votre abonnement expire dans " + si.daysLeft + (si.daysLeft > 1 ? " jours !" : " jour !")
+                : "Votre abonnement a expiré !");
+            renewPulse = Fx.pulse(findViewById(R.id.btn_renew), 1.03f, 900);
+            findViewById(R.id.btn_renew).setOnClickListener(v -> openWhatsApp(
+                "Bonjour, je souhaite renouveler mon abonnement Wise IPTV. Device Key : " + key));
+        }
+    }
+
+    private void bindHelp(String key) {
+        View row = findViewById(R.id.row_help);
+        ((ImageView) row.findViewById(R.id.row_icon)).setImageResource(R.drawable.ic_chat);
+        ((TextView) row.findViewById(R.id.row_title)).setText("Besoin d'aide ?");
+        ((TextView) row.findViewById(R.id.row_sub)).setText("Contactez notre support WhatsApp");
+        row.setOnClickListener(v -> openWhatsApp("Bonjour, j'ai besoin d'aide avec Wise IPTV. Device Key : " + key));
+    }
+
+    private void loadStats() {
+        final AppDatabase db = AppDatabase.get(this);
+        Executors.newSingleThreadExecutor().execute(() -> {
+            final int live   = db.channelDao().countByType(ChannelEntity.TYPE_LIVE);
+            final int films  = db.channelDao().countByType(ChannelEntity.TYPE_FILM);
+            final int series = db.channelDao().countByType(ChannelEntity.TYPE_SERIES);
+            final int favs   = db.channelDao().countFavorites();
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                Fx.countUp((TextView) findViewById(R.id.stat_live),   live,   800);
+                Fx.countUp((TextView) findViewById(R.id.stat_films),  films,  800);
+                Fx.countUp((TextView) findViewById(R.id.stat_series), series, 800);
+                Fx.countUp((TextView) findViewById(R.id.stat_favs),   favs,   800);
+            });
+        });
+    }
+
+    @Override protected void onDestroy() {
+        if (renewPulse != null) renewPulse.cancel();
+        super.onDestroy();
+    }
+
+    private void openWhatsApp(String message) {
+        try {
+            Uri u = Uri.parse("https://wa.me/" + SubscriptionInfo.WHATSAPP
+                + "?text=" + Uri.encode(message));
+            startActivity(new Intent(Intent.ACTION_VIEW, u));
+        } catch (Exception e) {
+            Toast.makeText(this, "WhatsApp indisponible", Toast.LENGTH_SHORT).show();
+        }
+    }
+}

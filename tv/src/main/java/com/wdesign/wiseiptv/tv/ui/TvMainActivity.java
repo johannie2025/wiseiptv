@@ -21,6 +21,8 @@ import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
 import com.wdesign.wiseiptv.core.security.DeviceSecurity;
+import com.wdesign.wiseiptv.core.util.Fx;
+import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
 import com.wdesign.wiseiptv.tv.R;
 import com.wdesign.wiseiptv.tv.adapter.TvCardPresenter;
 import com.wdesign.wiseiptv.tv.util.ActivationManager;
@@ -71,6 +73,18 @@ public class TvMainActivity extends FragmentActivity {
         btnAdd       = findViewById(R.id.btn_add);
         btnSync      = findViewById(R.id.btn_sync);
         btnRecents   = findViewById(R.id.btn_recents);
+
+        // Nouveau design : pastille abonnement + animations de focus
+        TextView subPill = findViewById(R.id.tv_sub_pill);
+        SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_TV);
+        if (si != null && si.active) {
+            subPill.setText("Actif · " + si.daysLeft + (si.daysLeft > 1 ? " jours" : " jour"));
+            if (si.isExpiringSoon(5)) subPill.setBackgroundResource(R.drawable.bg_badge_live);
+            subPill.setVisibility(View.VISIBLE);
+        }
+        Fx.focusZoom(btnSearch, 1.12f); Fx.focusZoom(btnAdd, 1.12f);
+        Fx.focusZoom(btnSync, 1.12f);   Fx.focusZoom(btnRecents, 1.12f);
+        Fx.enter(findViewById(R.id.top_bar), 0);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
         progressBar  = findViewById(R.id.progress_bar);
         previewPlayerView = findViewById(R.id.tv_preview_player);
