@@ -1,66 +1,105 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent" android:layout_height="match_parent"
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
     android:background="@drawable/bg_app_gradient">
 
-    <LinearLayout
-        android:layout_width="match_parent" android:layout_height="match_parent"
-        android:orientation="vertical" android:gravity="center_horizontal"
-        android:paddingBottom="170dp">
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:clipToPadding="false"
+        android:paddingBottom="80dp">
 
-        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
-            android:layout_weight="1">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_gravity="center" android:orientation="vertical"
-                android:gravity="center_horizontal">
+        <LinearLayout
+            android:id="@+id/set_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
 
-                <ImageView android:id="@+id/splash_logo"
-                    android:layout_width="150dp" android:layout_height="150dp"
-                    android:layout_gravity="center"
-                    android:src="@mipmap/ic_launcher" android:scaleType="fitCenter"
-                    android:contentDescription="Wise IPTV"/>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Paramètres"
+                style="@style/Wise.Title"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="14dp" />
 
-                <TextView android:id="@+id/splash_title"
-                    android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:text="Wise IPTV" android:textColor="@color/white"
-                    android:textSize="32sp" android:textStyle="bold"/>
+            <include
+                android:id="@+id/row_account"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_appearance"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_language"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_parental"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_network"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_video"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_grid"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_refresh"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_support"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+            <include
+                android:id="@+id/row_about"
+                layout="@layout/row_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
 
-                <TextView android:id="@+id/splash_tagline"
-                    android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:gravity="center"
-                    android:text="La télévision du monde\nà portée de main"
-                    android:textColor="@color/text_secondary" android:textSize="15sp"/>
-            </LinearLayout>
-        </FrameLayout>
-    </LinearLayout>
+            <TextView
+                android:id="@+id/tv_set_footer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:layout_marginTop="18dp"
+                android:text="W Design — +240 222 886 007"
+                android:textColor="#5C7099"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </ScrollView>
 
-    <LinearLayout android:id="@+id/splash_footer"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_gravity="bottom" android:orientation="vertical"
-        android:gravity="center_horizontal" android:paddingBottom="28dp">
-
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="Powered by" android:textColor="@color/text_secondary" android:textSize="11sp"/>
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="W DESIGN" android:textColor="@color/white"
-            android:textSize="20sp" android:textStyle="bold" android:letterSpacing="0.18"/>
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="AGENCE D'ARCHITECTURE · DESIGN · INNOVATION"
-            android:textColor="@color/text_secondary" android:textSize="8sp"
-            android:letterSpacing="0.1" android:layout_marginBottom="22dp"/>
-
-        <ProgressBar android:id="@+id/splash_progress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="200dp" android:layout_height="6dp"
-            android:max="100" android:progress="0"
-            android:progressDrawable="@drawable/progress_gradient"/>
-        <TextView android:id="@+id/splash_loading"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginTop="8dp" android:text="Chargement…"
-            android:textColor="@color/text_secondary" android:textSize="12sp"/>
-        <TextView android:id="@+id/splash_version"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginTop="4dp" android:text="Wise IPTV"
-            android:textColor="#5C7099" android:textSize="11sp"/>
-    </LinearLayout>
-</FrameLayout>
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_nav"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@color/wise_surface"
+        android:elevation="10dp"
+        app:menu="@menu/bottom_nav_menu"
+        app:labelVisibilityMode="labeled"
+        app:itemIconTint="@color/nav_selector"
+        app:itemTextColor="@color/nav_selector" />
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
