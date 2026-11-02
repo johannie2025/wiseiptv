@@ -39,6 +39,12 @@
                 android:textColor="#FFFFC857" android:textSize="14sp" android:visibility="gone"/>
         </LinearLayout>
 
+        <TextView android:id="@+id/tv_now"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:textColor="#FFFFFFFF"
+            android:textSize="15sp" android:maxLines="1" android:ellipsize="end"
+            android:visibility="gone"/>
+
         <!-- Hint zapping -->
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="8dp"

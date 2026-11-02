@@ -26,17 +26,14 @@ public class TvSplashActivity extends FragmentActivity {
         setContentView(R.layout.activity_tv_splash);
 
         View logo = findViewById(R.id.splash_logo);
-        View glow = findViewById(R.id.splash_glow);
         ProgressBar pb = findViewById(R.id.splash_progress);
         TextView ver = findViewById(R.id.splash_version);
         ver.setText("Wise IPTV v" + versionName());
 
         logo.setAlpha(0f); logo.setScaleX(0.55f); logo.setScaleY(0.55f);
         logo.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(750)
-            .setInterpolator(new OvershootInterpolator(1.4f)).start();
-        glow.setAlpha(0f);
-        glow.animate().alpha(1f).setDuration(900).start();
-        glowPulse = Fx.pulse(glow, 1.1f, 1500);
+            .setInterpolator(new OvershootInterpolator(1.4f))
+            .withEndAction(() -> { if (!left) glowPulse = Fx.pulse(logo, 1.06f, 1300); }).start();
         Fx.stagger(450, 160, findViewById(R.id.splash_title),
             findViewById(R.id.splash_tagline), findViewById(R.id.splash_footer));
 

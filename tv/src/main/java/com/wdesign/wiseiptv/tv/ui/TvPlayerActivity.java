@@ -9,7 +9,10 @@ import androidx.media3.common.util.UnstableApi;
 import androidx.media3.ui.PlayerView;
 import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
+import com.wdesign.wiseiptv.core.epg.EpgClient;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.util.DataUsage;
+import java.util.List;
 import com.wdesign.wiseiptv.tv.R;
 import java.util.concurrent.Executors;
 
@@ -25,7 +28,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
 
     private PlayerView playerView;
     private PlayerEngine engine;
-    private TextView tvName, tvQuality, tvStatus, tvGroup;
+    private TextView tvName, tvQuality, tvStatus, tvGroup, tvNow;
     private ProgressBar progressBar;
     private View osd;
     private AppDatabase db;
@@ -55,6 +58,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         tvStatus    = findViewById(R.id.tv_status);
         tvGroup     = findViewById(R.id.tv_group);
         osd         = findViewById(R.id.osd);
+        tvNow       = findViewById(R.id.tv_now);
 
         tvName.setText(channelName);
         if (tvGroup != null && groupTitle != null) tvGroup.setText(groupTitle);
@@ -65,7 +69,45 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         engine.play(streamUrl);
         long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
         if (startPosition > 0) engine.seekTo(startPosition);
+        saveState(true);
+        loadNow();
         showOsd();
+    }
+
+    /** Mémorise la lecture en cours pour la reprise à la prochaine ouverture. */
+    private void saveState(boolean open) {
+        android.content.SharedPreferences.Editor e =
+            getSharedPreferences("wise_tv_state", MODE_PRIVATE).edit()
+                .putBoolean("player_open", open).putLong("player_channel", channelId);
+        if (open && engine != null && contentType != ChannelEntity.TYPE_LIVE)
+            e.putLong("player_pos", engine.getPosition());
+        e.apply();
+    }
+
+    /** Programme en cours / suivant (EPG) dans l'OSD. */
+    private void loadNow() {
+        tvNow.setVisibility(View.GONE);
+        if (streamUrl == null || streamUrl.contains("/timeshift/")) return;
+        final long id = channelId;
+        EpgClient.load(streamUrl, new EpgClient.Callback() {
+            @Override public void onResult(List<EpgClient.Program> programs, EpgClient.Source source) {
+                if (isFinishing() || isDestroyed() || id != channelId || programs == null) return;
+                long now = System.currentTimeMillis() / 1000;
+                String cur = null, next = null;
+                for (int i = 0; i < programs.size(); i++) {
+                    if (programs.get(i).isNow(now)) {
+                        cur = programs.get(i).time() + "  " + programs.get(i).title;
+                        if (i + 1 < programs.size())
+                            next = programs.get(i + 1).time() + "  " + programs.get(i + 1).title;
+                        break;
+                    }
+                }
+                if (cur == null) return;
+                tvNow.setText("En cours : " + cur + (next != null ? "     Ensuite : " + next : ""));
+                tvNow.setVisibility(View.VISIBLE);
+            }
+            @Override public void onError(String message) { }
+        });
     }
 
     /** Zapping TV: DPAD_LEFT = précédent, DPAD_RIGHT = suivant */
@@ -84,6 +126,8 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
                 tvName.setText(channelName);
                 if (tvGroup != null && groupTitle != null) tvGroup.setText(groupTitle);
                 engine.play(streamUrl);
+                saveState(true);
+                loadNow();
                 showOsd();
             });
         });
@@ -125,7 +169,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
                 int q = Math.max(engine.getQuality()-1, 0);
                 engine.setQuality(q); tvQuality.setText(PlayerEngine.QUALITY_LABELS[q]); return true; }
 
-            case KeyEvent.KEYCODE_BACK: finish(); return true;
+            case KeyEvent.KEYCODE_BACK: saveState(false); finish(); return true;
         }
         return super.onKeyDown(keyCode, event);
     }
@@ -134,7 +178,11 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         osd.animate().alpha(1).setDuration(200).start();
         osdHandler.removeCallbacks(hideOsd); osdHandler.postDelayed(hideOsd, 5000);
     }
-    @Override protected void onStop() { super.onStop(); if (engine != null) engine.pause(); }
+    @Override protected void onStop() {
+        super.onStop();
+        if (engine != null) { saveState(!isFinishing()); engine.pause(); }
+        DataUsage.flush(this);
+    }
     @Override protected void onDestroy() {
         super.onDestroy(); osdHandler.removeCallbacksAndMessages(null);
         if (engine != null) { engine.release(); engine = null; }

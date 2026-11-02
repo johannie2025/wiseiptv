@@ -1,20 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@drawable/bg_app_gradient">
+    android:background="@color/wise_bg">
+
+    <ImageView android:layout_width="match_parent" android:layout_height="match_parent"
+        android:src="@drawable/bg_world" android:scaleType="centerCrop"
+        android:contentDescription="@null"/>
+    <View android:layout_width="match_parent" android:layout_height="match_parent"
+        android:background="#66040814"/>
 
     <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center"
         android:paddingBottom="90dp">
-        <FrameLayout android:layout_width="300dp" android:layout_height="300dp">
-            <View android:id="@+id/splash_glow"
-                android:layout_width="match_parent" android:layout_height="match_parent"
-                android:background="@drawable/bg_splash_glow"/>
-            <ImageView android:id="@+id/splash_logo"
-                android:layout_width="190dp" android:layout_height="190dp"
-                android:layout_gravity="center" android:src="@mipmap/ic_launcher"
-                android:scaleType="fitCenter" android:contentDescription="Wise IPTV"/>
-        </FrameLayout>
+        <ImageView android:id="@+id/splash_logo"
+            android:layout_width="230dp" android:layout_height="230dp"
+            android:layout_marginBottom="12dp"
+            android:src="@mipmap/ic_launcher" android:scaleType="fitCenter"
+            android:contentDescription="Wise IPTV"/>
         <TextView android:id="@+id/splash_title"
             android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="Wise IPTV" android:textColor="@color/white"
