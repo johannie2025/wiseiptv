@@ -23,16 +23,14 @@ import java.util.List;
     @Query("SELECT * FROM channels WHERE is_favorite=1 ORDER BY name ASC") LiveData<List<ChannelEntity>> getFavorites();
     @Query("SELECT * FROM channels WHERE name LIKE '%'||:q||'%' OR group_title LIKE '%'||:q||'%' OR country LIKE '%'||:q||'%' ORDER BY content_type,name ASC") LiveData<List<ChannelEntity>> search(String q);
     @Query("UPDATE channels SET is_favorite=:fav WHERE id=:id") void setFavorite(long id, boolean fav);
- // ── AJOUT : Recherche synchrone (bloquante/directe) pour exécution en arrière-plan avec limite à 50 résultats ──
-    @Query("SELECT * FROM channels WHERE name LIKE '%'||:q||'%' OR group_title LIKE '%'||:q||'%' ORDER BY content_type,name ASC LIMIT 50") 
-    List<ChannelEntity> searchSync(String q);  
+    @Query("SELECT * FROM channels WHERE name LIKE '%'||:q||'%' OR group_title LIKE '%'||:q||'%' ORDER BY content_type,name ASC LIMIT 50") List<ChannelEntity> searchSync(String q);
+    @Query("SELECT * FROM channels ORDER BY RANDOM() LIMIT :limit") List<ChannelEntity> getRandom(int limit);
     @Query("DELETE FROM channels WHERE playlist_id=:pid") void deleteByPlaylist(long pid);
     @Query("DELETE FROM channels") void deleteAll();
     @Query("SELECT COUNT(*) FROM channels") int count();
     @Query("SELECT COUNT(*) FROM channels WHERE content_type=:t") int countByType(int t);
     @Query("SELECT COUNT(*) FROM channels WHERE is_favorite=1") int countFavorites();
     @Query("SELECT * FROM channels WHERE id=:id LIMIT 1") ChannelEntity findById(long id);
-    // Zapping: prev/next dans le même group et content_type
     @Query("SELECT * FROM channels WHERE sort_order < :order AND content_type=:type AND (group_title=:grp OR :grp IS NULL) ORDER BY sort_order DESC LIMIT 1") ChannelEntity getPrev(int order, int type, String grp);
     @Query("SELECT * FROM channels WHERE sort_order > :order AND content_type=:type AND (group_title=:grp OR :grp IS NULL) ORDER BY sort_order ASC LIMIT 1") ChannelEntity getNext(int order, int type, String grp);
 }
