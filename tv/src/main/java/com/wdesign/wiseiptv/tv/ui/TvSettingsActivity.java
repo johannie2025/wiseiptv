@@ -30,6 +30,6 @@ public class TvSettingsActivity extends AppCompatActivity {
 
         acc.setOnClickListener(v -> startActivity(new Intent(this, TvAccountActivity.class)));
         about.setOnClickListener(v -> startActivity(new Intent(this, TvAboutActivity.class)));
-        ((TextView) findViewById(R.id.tv_settings_version)).setText("v" + SubscriptionInfo.VERSION_NAME);
+        ((TextView) findViewById(R.id.tv_settings_version)).setText("v1.0.0");
     }
 }
