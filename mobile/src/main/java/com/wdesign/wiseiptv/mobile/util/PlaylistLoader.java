@@ -83,7 +83,27 @@ public class PlaylistLoader {
         c.setConnectTimeout(15_000); c.setReadTimeout(60_000);
         c.setRequestProperty("User-Agent", "WiseIPTV/2.0");
         if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
-        return c.getInputStream();
+        return counting(c.getInputStream());
+    }
+
+    /** Compte les octets téléchargés dans les statistiques de consommation. */
+    private static InputStream counting(final InputStream in) {
+        return new java.io.FilterInputStream(in) {
+            @Override public int read() throws IOException {
+                int b = super.read();
+                if (b >= 0) count(1);
+                return b;
+            }
+            @Override public int read(byte[] buf, int off, int len) throws IOException {
+                int n = super.read(buf, off, len);
+                if (n > 0) count(n);
+                return n;
+            }
+            private void count(int n) {
+                com.wdesign.wiseiptv.mobile.WiseApp app = com.wdesign.wiseiptv.mobile.WiseApp.get();
+                if (app != null) com.wdesign.wiseiptv.core.util.DataUsage.add(app, n);
+            }
+        };
     }
 
     /**
@@ -115,7 +135,7 @@ public class PlaylistLoader {
         c.setRequestProperty("User-Agent", "WiseIPTV/2.0");
         if (c.getResponseCode() != 200)
             throw new IOException("Xtream HTTP " + c.getResponseCode() + " → " + m3uUrl);
-        InputStream is = c.getInputStream();
+        InputStream is = counting(c.getInputStream());
         List<ChannelEntity> list = M3UParser.parse(is);
         is.close();
         return list;

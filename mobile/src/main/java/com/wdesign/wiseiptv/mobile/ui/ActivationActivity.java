@@ -271,6 +271,7 @@ public class ActivationActivity extends AppCompatActivity {
 
     private void saveCache(DeviceSecurity.ActivationResult r) {
         if (r == null) return;
+        com.wdesign.wiseiptv.core.util.SubscriptionHistory.record(this, r.expiresAt);
         SharedPreferences.Editor ed = getPrefs().edit()
             .putString("status",     "ACTIVE")
             .putString("expires_at", r.expiresAt != null ? r.expiresAt : "")

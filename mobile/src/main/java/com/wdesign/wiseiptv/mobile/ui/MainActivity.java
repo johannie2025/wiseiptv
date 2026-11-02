@@ -1,17 +1,19 @@
 package com.wdesign.wiseiptv.mobile.ui;
 
 import android.content.*;
-import android.graphics.Typeface;
 import android.os.*;
 import android.text.TextUtils;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.*;
 import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.ContextCompat;
+import androidx.lifecycle.LiveData;
+import androidx.lifecycle.Observer;
 import androidx.recyclerview.widget.*;
+import com.wdesign.wiseiptv.core.util.AppSettings;
+import com.wdesign.wiseiptv.mobile.util.ParentalControl;
+import com.wdesign.wiseiptv.mobile.util.ResumeStore;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.ui.PlayerView;
 import com.bumptech.glide.Glide;
@@ -26,154 +28,139 @@ import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
 import com.wdesign.wiseiptv.mobile.R;
 import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
 import com.wdesign.wiseiptv.mobile.util.PlaylistLoader;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
 
+/**
+ * MainActivity — s'ouvre DIRECTEMENT depuis ActivationActivity.
+ * Le téléchargement des playlists se fait ici, en background, DNS par DNS.
+ *
+ * Flux identique à TvMainActivity :
+ *  1. Lit les extras passés par ActivationActivity (login + dnsUrls)
+ *  2. Sinon lit les SharedPreferences "wise_activation" (reboot / rotation)
+ *  3. Sinon refresh stale des playlists manuelles
+ *  4. processNextDns() : séquentiel, auto-détect Xtream vs M3U URL
+ */
 @OptIn(markerClass = UnstableApi.class)
 public class MainActivity extends AppCompatActivity implements ChannelAdapter.OnChannelClick {
 
+    // Extras reçus depuis ActivationActivity
     public static final String EXTRA_LOGIN    = "act_login";
     public static final String EXTRA_PASSWORD = "act_password";
     public static final String EXTRA_EXPIRES  = "act_expires";
     public static final String EXTRA_DNS_URLS = "act_dns_urls";
     public static final String EXTRA_DNS_EPGS = "act_dns_epg_urls";
+
+    // Alias attendus par ActivationActivity
     public static final String EXTRA_ACT_LOGIN       = EXTRA_LOGIN;
     public static final String EXTRA_ACT_PASSWORD    = EXTRA_PASSWORD;
     public static final String EXTRA_ACT_EXPIRES     = EXTRA_EXPIRES;
     public static final String EXTRA_ACT_DNS_URLS    = EXTRA_DNS_URLS;
     public static final String EXTRA_ACT_DNS_EPG_URLS = EXTRA_DNS_EPGS;
+
+    // Navigation / actions depuis les autres écrans (Paramètres, barre du bas)
     public static final String EXTRA_NAV        = "nav_target";
     public static final String EXTRA_OPEN_ADD   = "open_add_playlist";
     public static final String EXTRA_FORCE_SYNC = "force_sync";
 
     private static final String TAG   = "MainActivity";
     private static final String PREFS = "wise_activation";
-    private static final String PREFS_RECENTS = "wise_mobile_recents";
-    private static final int MAX_RECENTS = 20;
 
-    private RecyclerView rvChannels;
-    private ChannelAdapter adapter;
-    private ProgressBar progressBar;
-    private TextView tvEmpty, tvSyncStatus;
-    private TabLayout tabLayout;
-    private BottomNavigationView bottomNav;
-    private SearchView searchView;
-    private ImageButton btnGrid;
-    private GridLayoutManager gridLayoutManager;
-    private ImageView homeBackdrop;
-    private FrameLayout homePreviewContainer;
-    private PlayerView homePreviewView;
-    private TextView tvHomePreviewName;
-    private View cardSubscription;
-    private TextView tvGreeting, tvSubTitle, tvSubExpiry, tvSubDays, tvAvatar;
-    private Button btnWatchNow;
-    private LinearLayout homeQuickStrip;
-    private PlayerEngine homePreviewEngine;
-    private List<ChannelEntity> homeChannels = new ArrayList<>();
-    private long previewChannelId = -1;
-    private long previewPositionMs;
-    private boolean showingHome = true;
-    private AppDatabase db;
-    private int currentTab = 0;
+    private RecyclerView          rvChannels;
+    private ChannelAdapter        adapter;
+    private ProgressBar           progressBar;
+    private TextView              tvEmpty, tvSyncStatus;
+    private TabLayout             tabLayout;
+    private BottomNavigationView  bottomNav;
+    private SearchView            searchView;
+    private ImageButton            btnGrid;
+    private GridLayoutManager      gridLayoutManager;
+    private View                   homePanel;
+    private TextView               heroTitle, heroSub, heroBadge;
+    private ImageView              heroLogo;
+    private LinearLayout           heroDots;
+    private RecyclerView           rvHomeSlider;
+    private ChannelAdapter         sliderAdapter;
+    private View                   cardSubscription;
+    private TextView               tvGreeting, tvSubTitle, tvSubExpiry, tvSubDays, tvAvatar;
+    private List<ChannelEntity>    homeChannels = new java.util.ArrayList<>();
+    private int                    heroIndex = 0;
+    private boolean                showingHome = true;
+    private LiveData<List<ChannelEntity>> activeSource;
+    private final Observer<List<ChannelEntity>> listObserver = this::updateList;
+    private static final String    PREFS_RECENTS = "wise_mobile_recents";
+    private static final int       MAX_RECENTS = 20;
+    private static final int       HERO_COUNT = 5;
+    private AppDatabase           db;
+    private int                   currentTab = 0;
 
-    private final java.util.concurrent.ExecutorService syncExecutor = Executors.newSingleThreadExecutor();
-    private final Handler previewHandler = new Handler(Looper.getMainLooper());
-    private final Runnable updateRecentPreview = this::previewVisibleRecent;
+    // Executor unique pour toute la chaîne processNextDns — évite conflits Room multi-thread
+    private final java.util.concurrent.ExecutorService syncExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final Handler heroHandler = new Handler(Looper.getMainLooper());
+    private final Runnable heroRotate = new Runnable() {
+        @Override public void run() {
+            if (!showingHome || homeChannels.size() < 2) return;
+            heroIndex = (heroIndex + 1) % Math.min(HERO_COUNT, homeChannels.size());
+            bindHero();
+            heroHandler.postDelayed(this, 5000);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        db = AppDatabase.get(this);
-        rvChannels = findViewById(R.id.rv_channels);
-        progressBar = findViewById(R.id.progress_bar);
-        tvEmpty = findViewById(R.id.tv_empty);
+        db           = AppDatabase.get(this);
+        rvChannels   = findViewById(R.id.rv_channels);
+        progressBar  = findViewById(R.id.progress_bar);
+        tvEmpty      = findViewById(R.id.tv_empty);
         tvSyncStatus = findViewById(R.id.tv_sync_status);
-        tabLayout = findViewById(R.id.tab_layout);
-        bottomNav = findViewById(R.id.bottom_nav);
-        searchView = findViewById(R.id.search_view);
-        btnGrid = findViewById(R.id.btn_grid);
-        homeBackdrop = findViewById(R.id.home_backdrop);
-        homePreviewContainer = findViewById(R.id.home_preview_container);
-        homePreviewView = findViewById(R.id.home_preview_player);
-        tvHomePreviewName = findViewById(R.id.tv_home_preview_name);
-        cardSubscription = findViewById(R.id.card_subscription);
-        tvGreeting = findViewById(R.id.tv_greeting);
-        tvSubTitle = findViewById(R.id.tv_sub_title);
-        tvSubExpiry = findViewById(R.id.tv_sub_expiry);
-        tvSubDays = findViewById(R.id.tv_sub_days);
-        tvAvatar = findViewById(R.id.tv_avatar);
-        btnWatchNow = findViewById(R.id.btn_watch_now);
-        homeQuickStrip = findViewById(R.id.home_quick_strip);
+        tabLayout    = findViewById(R.id.tab_layout);
+        bottomNav    = findViewById(R.id.bottom_nav);
+        searchView   = findViewById(R.id.search_view);
+        btnGrid      = findViewById(R.id.btn_grid);
+        homePanel    = findViewById(R.id.home_panel);
+        heroTitle    = findViewById(R.id.hero_title);
+        heroSub      = findViewById(R.id.hero_sub);
+        heroBadge    = findViewById(R.id.hero_badge);
+        heroLogo     = findViewById(R.id.hero_logo);
+        heroDots     = findViewById(R.id.hero_dots);
+        rvHomeSlider = findViewById(R.id.rv_home_slider);
+        cardSubscription  = findViewById(R.id.card_subscription);
+        tvGreeting        = findViewById(R.id.tv_greeting);
+        tvSubTitle        = findViewById(R.id.tv_sub_title);
+        tvSubExpiry       = findViewById(R.id.tv_sub_expiry);
+        tvSubDays         = findViewById(R.id.tv_sub_days);
+        tvAvatar          = findViewById(R.id.tv_avatar);
         tvAvatar.setOnClickListener(v -> startActivity(new Intent(this, AccountActivity.class)));
         cardSubscription.setOnClickListener(v -> startActivity(new Intent(this, AccountActivity.class)));
         Fx.pressable(cardSubscription);
 
         adapter = new ChannelAdapter(this);
-        int gridColumns = getSharedPreferences("wise_display", MODE_PRIVATE).getInt("grid_columns", 3);
-        gridColumns = Math.max(2, Math.min(5, gridColumns));
-        gridLayoutManager = new GridLayoutManager(this, gridColumns);
+        gridLayoutManager = new GridLayoutManager(this, AppSettings.gridColumns(this));
         rvChannels.setLayoutManager(gridLayoutManager);
         rvChannels.setAdapter(adapter);
-        rvChannels.addOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override public void onScrollStateChanged(@androidx.annotation.NonNull RecyclerView view, int state) {
-                if (state == RecyclerView.SCROLL_STATE_IDLE && showingHome) {
-                    previewHandler.removeCallbacks(updateRecentPreview);
-                    previewHandler.postDelayed(updateRecentPreview, 350);
-                }
-            }
-        });
+        applyLayoutMode();
 
-        btnWatchNow.setOnClickListener(v -> {
-            if (homeChannels == null || homeChannels.isEmpty()) {
-                Toast.makeText(this, "Aucune chaîne disponible pour le moment", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            openChannel(homeChannels.get(0));
+        // Slide horizontal des chaînes (accueil)
+        sliderAdapter = new ChannelAdapter(this, R.layout.item_channel_h);
+        rvHomeSlider.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        rvHomeSlider.setAdapter(sliderAdapter);
+        findViewById(R.id.btn_watch).setOnClickListener(v -> {
+            if (!homeChannels.isEmpty()) onClick(homeChannels.get(Math.min(heroIndex, homeChannels.size() - 1)));
         });
+        Fx.pressable(findViewById(R.id.btn_watch));
+        findViewById(R.id.btn_see_all).setOnClickListener(v -> openTab(1));
 
         setupGridChooser();
         setupTabs();
         setupSearch();
         setupBottomNav();
         startBackgroundSync();
+        if (savedInstanceState == null) restoreSession(getIntent());
         handleExtras(getIntent());
         Fx.stagger(40, 70, findViewById(R.id.header_row), cardSubscription, searchView, tabLayout);
-    }
-
-    private void renderHomeQuickStrip(List<ChannelEntity> channels) {
-        homeQuickStrip.removeAllViews();
-        if (channels == null || channels.isEmpty()) {
-            btnWatchNow.setEnabled(false);
-            btnWatchNow.setText("Aucune chaîne");
-            return;
-        }
-        btnWatchNow.setEnabled(true);
-        btnWatchNow.setText("Regarder");
-        for (ChannelEntity ch : channels) {
-            TextView item = new TextView(this);
-            item.setText(ch.name);
-            item.setTextColor(ContextCompat.getColor(this, R.color.white));
-            item.setTextSize(12f);
-            item.setTypeface(Typeface.DEFAULT_BOLD);
-            item.setBackgroundResource(R.drawable.bg_tab_chip);
-            item.setPadding(dp(10), dp(8), dp(10), dp(8));
-            item.setGravity(Gravity.CENTER);
-            item.setSingleLine();
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            );
-            lp.setMargins(dp(6), 0, dp(6), 0);
-            item.setLayoutParams(lp);
-            item.setOnClickListener(v -> openChannel(ch));
-            homeQuickStrip.addView(item);
-        }
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -182,6 +169,50 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         handleExtras(intent);
     }
 
+    /** Reprise à l'ouverture : onglet, puis écran (lecteur / compte / paramètres / à propos) laissés ouverts. */
+    private void restoreSession(Intent in) {
+        if (in == null || in.hasExtra(EXTRA_NAV) || in.getBooleanExtra(EXTRA_OPEN_ADD, false)
+            || in.getBooleanExtra(EXTRA_FORCE_SYNC, false)) return;
+        int tab = ResumeStore.tab(this);
+        if (tab >= 0 && tab <= 4) openTab(tab);
+        String screen = ResumeStore.screen(this);
+        if (ResumeStore.SCREEN_PLAYER.equals(screen)) {
+            final long id = ResumeStore.channelId(this);
+            if (id < 0) return;
+            syncExecutor.execute(() -> {
+                ChannelEntity ch = db.channelDao().findById(id);
+                if (ch == null || ParentalControl.isRestricted(this, ch)) return;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    Intent i = playerIntent(ch);
+                    long pos = ResumeStore.position(this);
+                    if (pos > 0 && ch.contentType != ChannelEntity.TYPE_LIVE)
+                        i.putExtra(PlayerActivity.EXTRA_START_POSITION, pos);
+                    i.putExtra(PlayerActivity.EXTRA_FULLSCREEN, ResumeStore.fullscreen(this));
+                    startActivity(i);
+                });
+            });
+        } else if (ResumeStore.SCREEN_ACCOUNT.equals(screen)) {
+            startActivity(new Intent(this, AccountActivity.class));
+        } else if (ResumeStore.SCREEN_SETTINGS.equals(screen)) {
+            startActivity(new Intent(this, SettingsActivity.class));
+        } else if (ResumeStore.SCREEN_ABOUT.equals(screen)) {
+            startActivity(new Intent(this, AboutActivity.class));
+        }
+    }
+
+    private Intent playerIntent(ChannelEntity ch) {
+        Intent i = new Intent(this, PlayerActivity.class);
+        i.putExtra(PlayerActivity.EXTRA_ID,   ch.id);
+        i.putExtra(PlayerActivity.EXTRA_NAME, ch.name);
+        i.putExtra(PlayerActivity.EXTRA_URL,  ch.streamUrl);
+        i.putExtra(PlayerActivity.EXTRA_TYPE, ch.contentType);
+        i.putExtra(PlayerActivity.EXTRA_GROUP, ch.groupTitle);
+        i.putExtra(PlayerActivity.EXTRA_ORDER, ch.sortOrder);
+        return i;
+    }
+
+    /** Actions demandées par les autres écrans (barre du bas, Paramètres). */
     private void handleExtras(Intent in) {
         if (in == null) return;
         if (in.getBooleanExtra(EXTRA_FORCE_SYNC, false)) {
@@ -202,6 +233,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         }
     }
 
+    /** Ouvre un onglet (0=Tout 1=Live 2=Films 3=Séries 4=Favoris). */
     private void openTab(int pos) {
         TabLayout.Tab t = tabLayout.getTabAt(pos);
         if (t != null && !t.isSelected()) { t.select(); return; }
@@ -211,6 +243,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         observeCurrentTab();
     }
 
+    /** Carte "Abonnement" + salutation (données du cache d'activation). */
     private void refreshSubscriptionCard() {
         SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_MOBILE);
         if (si == null) {
@@ -235,9 +268,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         if (showingHome) cardSubscription.setVisibility(View.VISIBLE);
     }
 
+    // ── Sync background ───────────────────────────────────────────
+
     private void startBackgroundSync() {
         Intent intent = getIntent();
-        String login = intent.getStringExtra(EXTRA_LOGIN);
+
+        // Chemin 1 : extras frais depuis ActivationActivity
+        String login    = intent.getStringExtra(EXTRA_LOGIN);
         String password = intent.getStringExtra(EXTRA_PASSWORD);
         String[] dnsUrls = intent.getStringArrayExtra(EXTRA_DNS_URLS);
         String[] dnsEpgs = intent.getStringArrayExtra(EXTRA_DNS_EPGS);
@@ -251,20 +288,27 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             return;
         }
 
+        // Chemin 2 : SharedPreferences (reboot / rotation)
         SharedPreferences prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        String savedStatus = prefs.getString("status", "UNKNOWN");
-        String savedLogin = prefs.getString("login", null);
-        String savedPass = prefs.getString("password", "");
+        String savedStatus = prefs.getString("status",   "UNKNOWN");
+        String savedLogin  = prefs.getString("login",    null);
+        String savedPass   = prefs.getString("password", "");
         String savedDnsRaw = prefs.getString("dns_urls", "");
 
         if ("ACTIVE".equals(savedStatus) && savedLogin != null && !savedDnsRaw.isEmpty()) {
+            // Vérifier si DB déjà peuplée — éviter re-sync inutile
             syncExecutor.execute(() -> {
                 boolean empty = (db.channelDao().count() == 0);
                 long lastSync = prefs.getLong("last_sync_ts", 0);
-                long weekMs = 7L * 24 * 60 * 60 * 1000;
-                boolean stale = (System.currentTimeMillis() - lastSync) > weekMs;
-                if (!empty && !stale) {
-                    Log.d(TAG, "Sync ch2: DB ok + sync récente, skip");
+                long interval = AppSettings.refreshIntervalMs(this);   // -1 = manuel
+                boolean stale = interval >= 0 && (System.currentTimeMillis() - lastSync) >= interval;
+                boolean forced = lastSync == 0;                    // « Actualiser maintenant »
+                if (!empty && !stale && !forced) {
+                    Log.d(TAG, "Sync ch2: DB ok, pas d'actualisation due, skip");
+                    return;
+                }
+                if (!empty && !forced && AppSettings.refreshWifiOnly(this) && !AppSettings.isOnWifi(this)) {
+                    Log.d(TAG, "Sync ch2: Wi-Fi requis, skip");
                     return;
                 }
                 Log.d(TAG, "Sync ch2: prefs dns=" + savedDnsRaw);
@@ -275,28 +319,39 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             return;
         }
 
+        // Chemin 3 : playlists manuelles stale
         Log.d(TAG, "Sync ch3: stale refresh");
         PlaylistLoader.refreshStaleIfNeeded(db, new PlaylistLoader.Callback() {
             @Override public void onDone(int c) {
-                if (c > 0 && !isFinishing() && !isDestroyed()) runOnUiThread(MainActivity.this::observeCurrentTab);
+                if (c > 0 && !isFinishing() && !isDestroyed())
+                    runOnUiThread(MainActivity.this::observeCurrentTab);
             }
             @Override public void onError(String msg) { Log.w(TAG, "stale: " + msg); }
         });
     }
 
+    /**
+     * Traitement séquentiel DNS — identique à TvMainActivity.
+     * Appels DB via syncExecutor uniquement → pas de conflit Room.
+     * PlaylistLoader.load() callbacks re-postés sur syncExecutor.
+     */
     private void processNextDns(int index, String[] dnsUrls, String login,
-                               String password, String[] epgUrls, int accumulated) {
+                                 String password, String[] epgUrls, int accumulated) {
         if (index >= dnsUrls.length) {
+            // Tous les DNS traités
             final int total = accumulated;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 showSync(false, null);
                 if (showingHome) showRecentHome(); else observeCurrentTab();
                 if (total > 0)
-                    Toast.makeText(this, "✅ " + total + " chaînes chargées", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "✅ " + total + " chaînes chargées",
+                        Toast.LENGTH_SHORT).show();
                 else {
+                    // DB vide → proposer ajout manuel
                     syncExecutor.execute(() -> {
-                        if (db.channelDao().count() == 0) runOnUiThread(this::showAddPlaylistDialog);
+                        if (db.channelDao().count() == 0)
+                            runOnUiThread(this::showAddPlaylistDialog);
                     });
                 }
                 getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -311,25 +366,38 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             return;
         }
 
-        final int idx = index + 1;
+        final int idx   = index + 1;
         final int total = dnsUrls.length;
         runOnUiThread(() -> showSync(true, "📥 Serveur " + idx + "/" + total + "…"));
 
+        // findOrCreatePlaylist s'exécute sur syncExecutor (déjà le cas ici)
         PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+
         PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
             @Override public void onDone(int count) {
                 Log.d(TAG, "DNS " + idx + " OK: " + count + " ch");
-                syncExecutor.execute(() -> processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated + count));
+                // Re-poster sur syncExecutor — évite appel DB sur thread PlaylistLoader
+                syncExecutor.execute(() ->
+                    processNextDns(index + 1, dnsUrls, login, password, epgUrls,
+                        accumulated + count));
             }
             @Override public void onError(String msg) {
                 Log.w(TAG, "DNS " + idx + " err: " + msg);
-                syncExecutor.execute(() -> processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated));
+                syncExecutor.execute(() ->
+                    processNextDns(index + 1, dnsUrls, login, password, epgUrls, accumulated));
             }
         });
     }
 
+    /**
+     * Auto-détecte Xtream (get.php / username= / base serveur) vs M3U URL (.m3u/.m3u8).
+     * Exemples :
+     *   https://tvradiozap.eu/get.php?username=x&password=y  → XTREAM
+     *   https://iptv-org.github.io/iptv/languages/eng.m3u    → M3U URL
+     */
     private PlaylistEntity findOrCreatePlaylist(String login, String password,
-                                              String dnsUrl, int idx) {
+                                                 String dnsUrl, int idx) {
+        // Chercher une playlist existante avec cette URL + login
         PlaylistEntity existing = db.playlistDao().findByUrlAndLogin(dnsUrl, login);
         if (existing != null) {
             existing.password = password;
@@ -339,16 +407,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         }
         PlaylistEntity pl = new PlaylistEntity();
         String low = dnsUrl.toLowerCase();
+        // Détecter M3U : se termine par .m3u ou .m3u8, ou contient "m3u" SANS "get.php"/"username"
         boolean isM3uUrl = low.endsWith(".m3u") || low.endsWith(".m3u8")
             || (low.contains("m3u") && !low.contains("get.php") && !low.contains("username="));
         if (isM3uUrl) {
             pl.type = PlaylistEntity.TYPE_M3U_URL;
             pl.name = "M3U #" + idx;
         } else {
+            // Tout le reste → Xtream (get.php, username=, base serveur)
             pl.type = PlaylistEntity.TYPE_XTREAM;
             pl.name = "IPTV #" + idx;
         }
-        pl.url = dnsUrl;
+        pl.url      = dnsUrl;
         pl.username = login;
         pl.password = password;
         pl.isActive = true;
@@ -357,14 +427,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         return pl;
     }
 
+    // ── UI helpers ────────────────────────────────────────────────
+
     private void showSync(boolean show, String msg) {
-        if (progressBar != null) progressBar.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (progressBar  != null) progressBar.setVisibility(show ? View.VISIBLE : View.GONE);
         if (tvSyncStatus != null) {
             tvSyncStatus.setVisibility(show ? View.VISIBLE : View.GONE);
             if (show && msg != null) tvSyncStatus.setText(msg);
         }
         if (!show && tvEmpty != null) tvEmpty.setVisibility(View.GONE);
     }
+
+    // ── Tabs, search, nav ─────────────────────────────────────────
 
     private void setupTabs() {
         String[] tabs = {"Tout","Live","Films","Séries","Favoris"};
@@ -373,6 +447,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             @Override public void onTabSelected(TabLayout.Tab t) {
                 currentTab = t.getPosition();
                 showingHome = false;
+                ResumeStore.setTab(MainActivity.this, currentTab);
                 showCategoryList();
                 observeCurrentTab();
             }
@@ -382,108 +457,143 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     }
 
     private void observeCurrentTab() {
+        LiveData<List<ChannelEntity>> src;
         switch (currentTab) {
-            case 0: db.channelDao().getAll().observe(this, this::updateList); break;
-            case 1: db.channelDao().getLive().observe(this, this::updateList); break;
-            case 2: db.channelDao().getFilms().observe(this, this::updateList); break;
-            case 3: db.channelDao().getSeries().observe(this, this::updateList); break;
-            case 4: db.channelDao().getFavorites().observe(this, this::updateList); break;
+            case 1:  src = db.channelDao().getLive(); break;
+            case 2:  src = db.channelDao().getFilms(); break;
+            case 3:  src = db.channelDao().getSeries(); break;
+            case 4:  src = db.channelDao().getFavorites(); break;
+            default: src = db.channelDao().getAll(); break;
+        }
+        observeSource(src);
+    }
+
+    private void observeSource(LiveData<List<ChannelEntity>> src) {
+        if (activeSource != null) activeSource.removeObserver(listObserver);
+        activeSource = src;
+        src.observe(this, listObserver);
+    }
+
+    private void updateList(List<ChannelEntity> raw) {
+        if (showingHome) return;
+        List<ChannelEntity> list = ParentalControl.filter(this, raw);
+        if (adapter != null) adapter.setData(list);
+        if (tvEmpty != null) {
+            tvEmpty.setText(currentTab == 4 ? "Aucun favori pour le moment." : "Aucune chaîne.\nAjoutez une playlist M3U");
+            tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
         }
     }
 
-    private void updateList(List<ChannelEntity> list) {
-        if (showingHome) return;
-        if (adapter != null) adapter.setData(list);
-        if (tvEmpty != null)
-            tvEmpty.setVisibility(list == null || list.isEmpty() ? View.VISIBLE : View.GONE);
-    }
-
     private void showCategoryList() {
-        homePreviewContainer.setVisibility(View.GONE);
+        homePanel.setVisibility(View.GONE);
+        rvChannels.setVisibility(View.VISIBLE);
         cardSubscription.setVisibility(View.GONE);
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) rvChannels.getLayoutParams();
-        params.topMargin = 0;
-        rvChannels.setLayoutParams(params);
-        if (homePreviewEngine != null) homePreviewEngine.pause();
+        heroHandler.removeCallbacks(heroRotate);
     }
 
     private void showRecentHome() {
         showingHome = true;
+        ResumeStore.setTab(this, -1);
         refreshSubscriptionCard();
-        homePreviewContainer.setVisibility(View.VISIBLE);
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) rvChannels.getLayoutParams();
-        params.topMargin = Math.round(168 * getResources().getDisplayMetrics().density);
-        rvChannels.setLayoutParams(params);
+        homePanel.setVisibility(View.VISIBLE);
+        rvChannels.setVisibility(View.GONE);
         syncExecutor.execute(() -> {
-            String raw = getSharedPreferences(PREFS_RECENTS, MODE_PRIVATE).getString("ids", "");
-            List<ChannelEntity> recent = new ArrayList<>();
-            if (!raw.isEmpty()) {
-                for (String id : raw.split(",")) {
-                    try {
-                        ChannelEntity channel = db.channelDao().findById(Long.parseLong(id));
-                        if (channel != null) recent.add(channel);
-                    } catch (NumberFormatException ignored) {}
-                }
-            }
-            if (recent.isEmpty()) {
-                List<ChannelEntity> fallback = db.channelDao().getRandom(6);
-                if (fallback != null && !fallback.isEmpty()) recent.addAll(fallback);
-            }
+            final List<ChannelEntity> picks = loadHomeChannels();
+            final boolean fromHistory = hasRecents();
             runOnUiThread(() -> {
                 if (!showingHome || isFinishing() || isDestroyed()) return;
-                homeChannels = recent;
-                adapter.setData(recent);
-                renderHomeQuickStrip(recent);
+                homeChannels = picks;
+                heroIndex = 0;
+                sliderAdapter.setData(picks);
+                ((TextView) findViewById(R.id.tv_home_section))
+                    .setText(fromHistory ? "Vos chaînes regardées" : "Chaînes populaires");
                 if (tvEmpty != null) {
-                    tvEmpty.setText(recent.isEmpty() ? "Aucune chaîne.\nAjoutez une playlist M3U" : "Vos chaînes regardées apparaîtront ici.");
-                    tvEmpty.setVisibility(recent.isEmpty() ? View.VISIBLE : View.GONE);
+                    tvEmpty.setText("Aucune chaîne pour le moment.\nPatientez pendant le chargement…");
+                    tvEmpty.setVisibility(picks.isEmpty() ? View.VISIBLE : View.GONE);
                 }
-                if (recent.isEmpty()) {
-                    homePreviewContainer.setVisibility(View.GONE);
-                    clearAdaptiveBackdrop();
-                } else {
-                    homePreviewContainer.setVisibility(View.VISIBLE);
-                    previewRecent(recent.get(0));
-                }
+                findViewById(R.id.home_hero).setVisibility(picks.isEmpty() ? View.GONE : View.VISIBLE);
+                heroDots.setVisibility(picks.isEmpty() ? View.GONE : View.VISIBLE);
+                bindHero();
+                heroHandler.removeCallbacks(heroRotate);
+                if (picks.size() > 1) heroHandler.postDelayed(heroRotate, 5000);
             });
         });
     }
 
-    private void previewVisibleRecent() {
-        if (!showingHome || homeChannels.isEmpty()) return;
-        int position = gridLayoutManager.findFirstVisibleItemPosition();
-        if (position >= 0 && position < homeChannels.size()) previewRecent(homeChannels.get(position));
+    private boolean hasRecents() {
+        return !getSharedPreferences(PREFS_RECENTS, MODE_PRIVATE).getString("ids", "").isEmpty();
     }
 
-    private void previewRecent(ChannelEntity channel) {
-        if (channel.logoUrl != null && !channel.logoUrl.isEmpty()) {
-            homeBackdrop.setVisibility(View.VISIBLE);
-            Glide.with(this).load(channel.logoUrl).centerCrop().into(homeBackdrop);
-            homeBackdrop.animate().alpha(0.18f).setDuration(280).start();
-        } else {
-            clearAdaptiveBackdrop();
+    /**
+     * Chaînes de l'accueil : celles déjà regardées (récentes d'abord) ; à la première utilisation
+     * (aucun historique) une sélection aléatoire, mémorisée pour rester stable jusqu'au premier visionnage.
+     * Appelé sur syncExecutor.
+     */
+    private List<ChannelEntity> loadHomeChannels() {
+        SharedPreferences sp = getSharedPreferences(PREFS_RECENTS, MODE_PRIVATE);
+        List<ChannelEntity> out = new java.util.ArrayList<>();
+        String raw = sp.getString("ids", "");
+        if (!raw.isEmpty()) {
+            for (String id : raw.split(",")) {
+                try {
+                    ChannelEntity c = db.channelDao().findById(Long.parseLong(id));
+                    if (c != null && !ParentalControl.isRestricted(this, c)) out.add(c);
+                } catch (NumberFormatException ignored) {}
+            }
+            if (!out.isEmpty()) return out;
         }
-        tvHomePreviewName.setText(channel.name);
-        if (homePreviewEngine == null) {
-            homePreviewEngine = new PlayerEngine(this, new PlayerEngine.Listener() {
-                @Override public void onBuffering(boolean buffering) {}
-                @Override public void onPlaying() {}
-                @Override public void onError(String message) {}
-            });
-            homePreviewEngine.attachView(homePreviewView);
+        String seed = sp.getString("seed_ids", "");
+        if (!seed.isEmpty()) {
+            for (String id : seed.split(",")) {
+                try {
+                    ChannelEntity c = db.channelDao().findById(Long.parseLong(id));
+                    if (c != null && !ParentalControl.isRestricted(this, c)) out.add(c);
+                } catch (NumberFormatException ignored) {}
+            }
+            if (out.size() >= 3) return out;
+            out.clear();
         }
-        if (previewChannelId != channel.id) {
-            previewChannelId = channel.id;
-            previewPositionMs = 0;
-            homePreviewEngine.play(channel.streamUrl);
-        } else if (!homePreviewEngine.isPlaying()) {
-            homePreviewEngine.resume();
+        List<ChannelEntity> rnd = db.channelDao().randomLiveWithLogo(60);
+        if (rnd == null || rnd.size() < 8) rnd = db.channelDao().randomLive(60);
+        if (rnd != null) {
+            for (ChannelEntity c : rnd) {
+                if (ParentalControl.isRestricted(this, c)) continue;
+                out.add(c);
+                if (out.size() >= MAX_RECENTS) break;
+            }
         }
+        if (!out.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (ChannelEntity c : out) { if (sb.length() > 0) sb.append(','); sb.append(c.id); }
+            sp.edit().putString("seed_ids", sb.toString()).apply();
+        }
+        return out;
     }
 
-    private void clearAdaptiveBackdrop() {
-        homeBackdrop.animate().alpha(0f).setDuration(240)
-            .withEndAction(() -> homeBackdrop.setVisibility(View.GONE)).start();
+    private void bindHero() {
+        if (homeChannels.isEmpty()) return;
+        int n = Math.min(HERO_COUNT, homeChannels.size());
+        if (heroIndex >= n) heroIndex = 0;
+        ChannelEntity c = homeChannels.get(heroIndex);
+        heroTitle.setText(c.name);
+        String sub = c.groupTitle != null && !c.groupTitle.isEmpty() ? c.groupTitle
+            : (c.country != null ? c.country : "");
+        heroSub.setText(sub);
+        heroBadge.setVisibility(c.contentType == ChannelEntity.TYPE_LIVE && AppSettings.liveBadges(this)
+            ? View.VISIBLE : View.GONE);
+        if (c.logoUrl != null && !c.logoUrl.isEmpty())
+            Glide.with(this).load(c.logoUrl).fitCenter().placeholder(R.drawable.ic_channel_placeholder).into(heroLogo);
+        else heroLogo.setImageResource(R.drawable.ic_channel_placeholder);
+        heroDots.removeAllViews();
+        for (int i = 0; i < n; i++) {
+            View d = new View(this);
+            int sz = Math.round(7 * getResources().getDisplayMetrics().density);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(sz, sz);
+            lp.setMargins(sz / 2 + 1, 0, sz / 2 + 1, 0);
+            d.setLayoutParams(lp);
+            d.setBackgroundResource(i == heroIndex ? R.drawable.dot_on : R.drawable.dot_off);
+            heroDots.addView(d);
+        }
     }
 
     private void saveRecent(ChannelEntity channel) {
@@ -520,7 +630,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 }
                 showingHome = false;
                 showCategoryList();
-                db.channelDao().search(q).observe(MainActivity.this, MainActivity.this::updateList);
+                observeSource(db.channelDao().search(q));
                 return true;
             }
         });
@@ -531,35 +641,39 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         btnGrid.setOnClickListener(anchor -> {
             android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
             for (int columns = 2; columns <= 5; columns++) {
-                menu.getMenu().add(0, columns, columns, columns + " colonnes");
+                menu.getMenu().add(0, columns, columns, "Grille · " + columns + " colonnes");
             }
+            menu.getMenu().add(0, 10, 10, "Liste");
             menu.setOnMenuItemClickListener(item -> {
-                setGridColumns(item.getItemId());
+                if (item.getItemId() == 10) AppSettings.setListLayout(this, true);
+                else { AppSettings.setListLayout(this, false); AppSettings.setGridColumns(this, item.getItemId()); }
+                applyLayoutMode();
                 return true;
             });
             menu.show();
         });
     }
 
-    private void setGridColumns(int columns) {
-        gridLayoutManager.setSpanCount(columns);
-        getSharedPreferences("wise_display", MODE_PRIVATE).edit()
-            .putInt("grid_columns", columns).apply();
+    /** Applique Grille/Liste (réglage persistant, aussi modifiable depuis Paramètres). */
+    private void applyLayoutMode() {
+        boolean list = AppSettings.isListLayout(this);
+        gridLayoutManager.setSpanCount(list ? 1 : AppSettings.gridColumns(this));
+        adapter.setListMode(list);
     }
 
     private void setupBottomNav() {
         if (bottomNav == null) return;
         bottomNav.setOnItemSelectedListener(item -> {
             int id = item.getItemId();
-            if (id == R.id.nav_home) { showRecentHome(); return true; }
-            else if (id == R.id.nav_live) { openTab(1); return true; }
-            else if (id == R.id.nav_fav) { openTab(4); return true; }
+            if      (id == R.id.nav_home)    { showRecentHome(); return true; }
+            else if (id == R.id.nav_live)    { openTab(1); return true; }
+            else if (id == R.id.nav_fav)     { openTab(4); return true; }
             else if (id == R.id.nav_account) {
                 startActivity(new Intent(this, AccountActivity.class));
                 overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
                 return false;
             }
-            else if (id == R.id.nav_settings) {
+            else if (id == R.id.nav_settings){
                 startActivity(new Intent(this, SettingsActivity.class));
                 overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
                 return false;
@@ -568,16 +682,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         });
     }
 
+    // ── Dialog ajout playlist manuel ──────────────────────────────
+
     public void showAddPlaylistDialog() {
         android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(this);
         b.setTitle("➕ Ajouter une playlist");
         android.view.View v = getLayoutInflater().inflate(R.layout.dialog_add_playlist, null);
         EditText etName = v.findViewById(R.id.et_playlist_name);
-        EditText etUrl = v.findViewById(R.id.et_playlist_url);
+        EditText etUrl  = v.findViewById(R.id.et_playlist_url);
         b.setView(v);
         b.setPositiveButton("Charger", (d, w) -> {
             String name = etName.getText().toString().trim();
-            String url = etUrl.getText().toString().trim();
+            String url  = etUrl.getText().toString().trim();
             if (TextUtils.isEmpty(url)) return;
             showSync(true, "Chargement…");
             syncExecutor.execute(() -> {
@@ -593,13 +709,15 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                         runOnUiThread(() -> {
                             showSync(false, null);
                             if (showingHome) showRecentHome(); else observeCurrentTab();
-                            Toast.makeText(MainActivity.this, c + " chaînes ✅", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MainActivity.this, c + " chaînes ✅",
+                                Toast.LENGTH_SHORT).show();
                         });
                     }
                     @Override public void onError(String msg) {
                         runOnUiThread(() -> {
                             showSync(false, null);
-                            Toast.makeText(MainActivity.this, "Erreur : " + msg, Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this, "Erreur : " + msg,
+                                Toast.LENGTH_LONG).show();
                         });
                     }
                 });
@@ -609,34 +727,18 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         b.show();
     }
 
+    // ── Clic sur une chaîne ───────────────────────────────────────
+
     @Override
     public void onClick(ChannelEntity ch) {
-        openChannel(ch);
-    }
-
-    private void openChannel(ChannelEntity ch) {
         saveRecent(ch);
-        previewRecent(ch);
-        previewPositionMs = ch.contentType == ChannelEntity.TYPE_LIVE
-            || ch.id != previewChannelId || homePreviewEngine == null
-            ? 0 : homePreviewEngine.getPosition();
-        if (homePreviewEngine != null) homePreviewEngine.pause();
-        Intent i = new Intent(this, PlayerActivity.class);
-        i.putExtra(PlayerActivity.EXTRA_ID, ch.id);
-        i.putExtra(PlayerActivity.EXTRA_NAME, ch.name);
-        i.putExtra(PlayerActivity.EXTRA_URL, ch.streamUrl);
-        i.putExtra(PlayerActivity.EXTRA_TYPE, ch.contentType);
-        i.putExtra(PlayerActivity.EXTRA_GROUP, ch.groupTitle);
-        i.putExtra(PlayerActivity.EXTRA_ORDER, ch.sortOrder);
-        if (previewPositionMs > 0) i.putExtra(PlayerActivity.EXTRA_START_POSITION, previewPositionMs);
-        startActivity(i);
+        startActivity(playerIntent(ch));
     }
 
     @Override protected void onResume() {
         super.onResume();
-        int cols = Math.max(2, Math.min(5, getSharedPreferences("wise_display", MODE_PRIVATE)
-            .getInt("grid_columns", 3)));
-        if (gridLayoutManager.getSpanCount() != cols) gridLayoutManager.setSpanCount(cols);
+        ResumeStore.setScreen(this, ResumeStore.SCREEN_MAIN);
+        applyLayoutMode();
         int navId = showingHome ? R.id.nav_home
             : currentTab == 1 ? R.id.nav_live
             : currentTab == 4 ? R.id.nav_fav : R.id.nav_home;
@@ -646,18 +748,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     }
 
     @Override protected void onPause() {
-        if (homePreviewEngine != null) {
-            previewPositionMs = homePreviewEngine.getPosition();
-            homePreviewEngine.pause();
-        }
+        heroHandler.removeCallbacks(heroRotate);
         super.onPause();
     }
 
     @Override protected void onDestroy() {
         super.onDestroy();
-        previewHandler.removeCallbacksAndMessages(null);
-        if (homePreviewView != null) homePreviewView.setPlayer(null);
-        if (homePreviewEngine != null) { homePreviewEngine.release(); homePreviewEngine = null; }
+        heroHandler.removeCallbacksAndMessages(null);
         syncExecutor.shutdownNow();
     }
 }

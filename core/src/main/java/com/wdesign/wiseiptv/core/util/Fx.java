@@ -23,6 +23,7 @@ public final class Fx {
     /** Entrée : fondu + glissement vers le haut. */
     public static void enter(View v, long delayMs) {
         if (v == null) return;
+        if (!AppSettings.animations(v.getContext())) { v.setAlpha(1f); v.setTranslationY(0f); return; }
         v.animate().cancel();
         v.setAlpha(0f);
         v.setTranslationY(dp(v, 22));
@@ -43,6 +44,7 @@ public final class Fx {
     /** Apparition "pop" (échelle + fondu), pour les cartes qui s'affichent après un état. */
     public static void pop(View v) {
         if (v == null) return;
+        if (!AppSettings.animations(v.getContext())) return;
         v.animate().cancel();
         v.setAlpha(0f);
         v.setScaleX(0.92f);
@@ -113,5 +115,26 @@ public final class Fx {
         a.setDuration(durationMs);
         a.setInterpolator(new DecelerateInterpolator());
         a.start();
+    }
+
+    /** Animation du logo lui-même (respiration + léger balancement), sans halo. À annuler dans onDestroy. */
+    public static android.animation.AnimatorSet logoLife(View logo) {
+        if (logo == null) return null;
+        android.animation.PropertyValuesHolder sx = android.animation.PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.07f);
+        android.animation.PropertyValuesHolder sy = android.animation.PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.07f);
+        ObjectAnimator breathe = ObjectAnimator.ofPropertyValuesHolder(logo, sx, sy);
+        breathe.setDuration(1100);
+        breathe.setRepeatCount(ValueAnimator.INFINITE);
+        breathe.setRepeatMode(ValueAnimator.REVERSE);
+        breathe.setInterpolator(new AccelerateDecelerateInterpolator());
+        ObjectAnimator sway = ObjectAnimator.ofFloat(logo, View.ROTATION, -3f, 3f);
+        sway.setDuration(1700);
+        sway.setRepeatCount(ValueAnimator.INFINITE);
+        sway.setRepeatMode(ValueAnimator.REVERSE);
+        sway.setInterpolator(new AccelerateDecelerateInterpolator());
+        android.animation.AnimatorSet set = new android.animation.AnimatorSet();
+        set.playTogether(breathe, sway);
+        set.start();
+        return set;
     }
 }

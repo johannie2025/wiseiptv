@@ -48,7 +48,16 @@ public class PlayerEngine {
             .retryOnConnectionFailure(true) // Relance instantanément la requête si le flux lâche
             .build();
 
-        DataSource.Factory dsFactory = new OkHttpDataSource.Factory(http);
+        final Context appCtx = context;
+        DataSource.Factory dsFactory = new OkHttpDataSource.Factory(http)
+            .setTransferListener(new androidx.media3.datasource.TransferListener() {
+                @Override public void onTransferInitializing(DataSource s, DataSpec d, boolean n) {}
+                @Override public void onTransferStart(DataSource s, DataSpec d, boolean n) {}
+                @Override public void onBytesTransferred(DataSource s, DataSpec d, boolean isNetwork, int bytes) {
+                    if (isNetwork) com.wdesign.wiseiptv.core.util.DataUsage.add(appCtx, bytes);
+                }
+                @Override public void onTransferEnd(DataSource s, DataSpec d, boolean n) {}
+            });
 
         // OPTIMISATION BUFFERING (DefaultLoadControl) : Évite les micro-coupures
         DefaultLoadControl lc = new DefaultLoadControl.Builder()
@@ -62,7 +71,20 @@ public class PlayerEngine {
             .build();
 
         DefaultTrackSelector ts = new DefaultTrackSelector(context);
-        ts.setParameters(ts.buildUponParameters().setAllowVideoMixedMimeTypeAdaptiveness(true).build());
+        DefaultTrackSelector.Parameters.Builder tsb = ts.buildUponParameters()
+            .setAllowVideoMixedMimeTypeAdaptiveness(true);
+        int al = com.wdesign.wiseiptv.core.util.AppSettings.audioLangIndex(context);
+        String code = com.wdesign.wiseiptv.core.util.AppSettings.AUDIO_CODES[al];
+        if (!code.isEmpty()) tsb.setPreferredAudioLanguage(code);
+        if (com.wdesign.wiseiptv.core.util.AppSettings.subtitles(context)) {
+            tsb.setPreferredTextLanguage(code.isEmpty() ? "fr" : code)
+               .setSelectUndeterminedTextLanguage(true);
+        } else {
+            tsb.setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT | C.SELECTION_FLAG_FORCED | C.SELECTION_FLAG_AUTOSELECT)
+               .setDisabledTrackTypes(java.util.Collections.singleton(C.TRACK_TYPE_TEXT));
+        }
+        ts.setParameters(tsb.build());
+        currentQuality = com.wdesign.wiseiptv.core.util.AppSettings.defaultQuality(context);
 
         exoPlayer = new ExoPlayer.Builder(context)
             .setLoadControl(lc)
@@ -113,12 +135,20 @@ public class PlayerEngine {
     private void applyQuality(int i) {
         if (exoPlayer == null) return;
         TrackSelectionParameters.Builder b = exoPlayer.getTrackSelectionParameters().buildUpon();
-        if (i == 0) b.setMaxVideoBitrate(Integer.MAX_VALUE);
-        else b.setMaxVideoBitrate(QUALITY_BITRATES[i]);
+        int cap = i == 0 ? Integer.MAX_VALUE : QUALITY_BITRATES[i];
+        if (com.wdesign.wiseiptv.core.util.AppSettings.networkMode(context)
+                == com.wdesign.wiseiptv.core.util.AppSettings.NET_SAVER)
+            cap = Math.min(cap, com.wdesign.wiseiptv.core.util.AppSettings.SAVER_MAX_BITRATE);
+        b.setMaxVideoBitrate(cap);
         exoPlayer.setTrackSelectionParameters(b.build());
     }
 
+    public void setPlayWhenReady(boolean v) { if (exoPlayer != null) exoPlayer.setPlayWhenReady(v); }
+    public void setMuted(boolean muted) { if (exoPlayer != null) exoPlayer.setVolume(muted ? 0f : 1f); }
+    public boolean isMuted() { return exoPlayer != null && exoPlayer.getVolume() == 0f; }
+
     public void release() {
+        com.wdesign.wiseiptv.core.util.DataUsage.flush(context);
         if (exoPlayer != null) { 
             exoPlayer.stop(); 
             exoPlayer.release(); 
