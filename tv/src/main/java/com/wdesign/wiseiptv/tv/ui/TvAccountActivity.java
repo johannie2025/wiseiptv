@@ -14,12 +14,14 @@ import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
 import com.wdesign.wiseiptv.tv.R;
 
 public class TvAccountActivity extends AppCompatActivity {
-    @Override protected void onCreate(Bundle savedInstanceState) {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_tv_account);
 
         String key = DeviceSecurity.getOrCreateKey(this);
         ((TextView) findViewById(R.id.tv_device_key)).setText(key);
+
         findViewById(R.id.btn_copy_key).setOnClickListener(v -> {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
@@ -34,17 +36,19 @@ public class TvAccountActivity extends AppCompatActivity {
         View renew = findViewById(R.id.btn_renew);
 
         if (info == null) {
-            status.setText("Non activé");
-            expiry.setText("Aucune date disponible");
-            data.setText("0 Mo");
-            history.setText("Aucun historique");
+            if (status != null) status.setText("Non activé");
+            if (expiry != null) expiry.setText("Aucune date disponible");
+            if (data != null) data.setText("0 Mo");
+            if (history != null) history.setText("Aucun historique");
         } else {
-            status.setText(info.active ? "Actif" : "Expiré");
-            data.setText("Données actives");
-history.setText("Abonnement TV Standard");
+            if (status != null) status.setText("Actif");
+            if (data != null) data.setText("Données actives");
+            if (history != null) history.setText("Abonnement TV Standard");
         }
 
-        Fx.focusZoom(renew, 1.04f);
-        renew.setOnClickListener(v -> Toast.makeText(this, "Renouvellement via revendeur / support", Toast.LENGTH_SHORT).show());
+        if (renew != null) {
+            Fx.focusZoom(renew, 1.04f);
+            renew.setOnClickListener(v -> Toast.makeText(this, "Renouvellement via revendeur / support", Toast.LENGTH_SHORT).show());
+        }
     }
 }
