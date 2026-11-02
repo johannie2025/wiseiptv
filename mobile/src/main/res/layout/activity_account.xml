@@ -448,3 +448,5 @@
         app:itemIconTint="@color/nav_selector"
         app:itemTextColor="@color/nav_selector" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
+<TextView android:id="@+id/tv_device_id" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_width="wrap_content" android:text="WISE-XXXXXX" android:textColor="@color/wise_blue_light" android:textSize="13sp"/>
+</LinearLayout>
