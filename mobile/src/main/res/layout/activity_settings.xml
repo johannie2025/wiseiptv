@@ -33,6 +33,12 @@
                 layout="@layout/row_setting"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
+<LinearLayout
+    android:id="@+id/row_playlists"
+    layout="@layout/row_setting"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content" />
+            
             <include
                 android:id="@+id/row_appearance"
                 layout="@layout/row_setting"
