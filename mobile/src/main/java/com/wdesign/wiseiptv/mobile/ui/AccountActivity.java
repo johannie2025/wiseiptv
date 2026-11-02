@@ -26,19 +26,19 @@ public class SettingsActivity extends AppCompatActivity {
             () -> startActivity(new Intent(this, AccountActivity.class)));
         View rAppearance = bindRow(R.id.row_appearance, R.drawable.ic_palette, "Apparence",
             currentSetting("appearance", "Sombre"), () -> showChoiceDialog(R.id.row_appearance, "Apparence",
-                "appearance", new String[]{"Sombre","Clair","Auto"}, new String[]{"Sombre","Clair","Auto"}, "Sombre")));
+                "appearance", new String[]{"Sombre","Clair","Auto"}, new String[]{"Sombre","Clair","Auto"}, "Sombre"));
         View rLanguage = bindRow(R.id.row_language, R.drawable.ic_language, "Langue",
             currentSetting("language", "Français"), () -> showChoiceDialog(R.id.row_language, "Langue",
-                "language", new String[]{"Français","English","العربية"}, new String[]{"Français","English","العربية"}, "Français")));
+                "language", new String[]{"Français","English","العربية"}, new String[]{"Français","English","العربية"}, "Français"));
         View rParental = bindRow(R.id.row_parental, R.drawable.ic_shield, "Contrôle parental",
             currentSetting("parental", "Désactivé"), () -> showChoiceDialog(R.id.row_parental, "Contrôle parental",
-                "parental", new String[]{"Désactivé","Actif","Enfant"}, new String[]{"Désactivé","Actif","Enfant"}, "Désactivé")));
+                "parental", new String[]{"Désactivé","Actif","Enfant"}, new String[]{"Désactivé","Actif","Enfant"}, "Désactivé"));
         View rNetwork = bindRow(R.id.row_network, R.drawable.ic_signal, "Qualité réseau",
             currentSetting("network", "Automatique"), () -> showChoiceDialog(R.id.row_network, "Qualité réseau",
-                "network", new String[]{"Automatique","Faible","Moyenne","Haute"}, new String[]{"Automatique","Faible","Moyenne","Haute"}, "Automatique")));
+                "network", new String[]{"Automatique","Faible","Moyenne","Haute"}, new String[]{"Automatique","Faible","Moyenne","Haute"}, "Automatique"));
         View rVideo = bindRow(R.id.row_video, R.drawable.ic_play, "Lecteur vidéo",
             currentSetting("video", "Complet"), () -> showChoiceDialog(R.id.row_video, "Lecteur vidéo",
-                "video", new String[]{"Complet","Compact","HD uniquement"}, new String[]{"Complet","Compact","HD uniquement"}, "Complet")));
+                "video", new String[]{"Complet","Compact","HD uniquement"}, new String[]{"Complet","Compact","HD uniquement"}, "Complet"));
         View rGrid = bindRow(R.id.row_grid, R.drawable.ic_grid, "Disposition",
             gridColumns() + " colonnes", this::showGridDialog);
         View rRefresh = bindRow(R.id.row_refresh, R.drawable.ic_refresh, "Actualiser les chaînes",
