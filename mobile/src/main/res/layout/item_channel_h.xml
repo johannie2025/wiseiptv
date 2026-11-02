@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="104dp" android:layout_height="96dp"
+    android:layout_marginEnd="8dp" android:background="@drawable/bg_card"
+    android:clipToOutline="true" android:foreground="?attr/selectableItemBackground">
+    <ImageView android:id="@+id/img_logo"
+        android:layout_width="match_parent" android:layout_height="68dp"
+        android:padding="8dp" android:scaleType="fitCenter" android:layout_gravity="top"
+        android:contentDescription="@null"/>
+    <TextView android:id="@+id/tv_name"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:background="#66000000"
+        android:textColor="@color/white" android:textSize="11sp"
+        android:paddingTop="5dp" android:paddingBottom="5dp"
+        android:paddingStart="4dp" android:paddingEnd="4dp"
+        android:ellipsize="end" android:maxLines="1" android:gravity="center_horizontal"/>
+    <TextView android:id="@+id/tv_live"
+        android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="top|end" android:layout_margin="4dp"
+        android:text="EN DIRECT" android:textColor="@color/white"
+        android:background="@drawable/bg_badge_live" android:textSize="6sp"
+        android:textStyle="bold" android:paddingStart="3dp" android:paddingEnd="3dp"
+        android:paddingTop="1dp" android:paddingBottom="1dp" android:visibility="gone"/>
+</FrameLayout>
