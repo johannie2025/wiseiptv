@@ -28,10 +28,10 @@ public class TvAboutActivity extends AppCompatActivity {
         Fx.focusZoom(privacy, 1.04f);
         Fx.focusZoom(contact, 1.04f);
 
-        web.setOnClickListener(v -> openUrl("https://www.wiseiptv.com"));
-        legal.setOnClickListener(v -> openUrl("https://www.wiseiptv.com/mentions-legales"));
-        privacy.setOnClickListener(v -> openUrl("https://www.wiseiptv.com/politique-de-confidentialite"));
-        contact.setOnClickListener(v -> openUrl("https://wa.me/240222886007"));
+       web.setOnClickListener(vw -> openUrl("https://www.wiseiptv.com"));
+legal.setOnClickListener(vl -> openUrl("https://www.wiseiptv.com/mentions-legales"));
+privacy.setOnClickListener(vp -> openUrl("https://www.wiseiptv.com/politique-de-confidentialite"));
+contact.setOnClickListener(vc -> openUrl("https://wa.me/240222886007"));
     }
 
     private void openUrl(String url) {
