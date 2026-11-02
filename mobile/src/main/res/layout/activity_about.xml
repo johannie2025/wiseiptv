@@ -44,6 +44,10 @@
                 android:layout_width="match_parent" android:layout_height="wrap_content"/>
             <include android:id="@+id/row_web" layout="@layout/row_setting"
                 android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_legal" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_privacy" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
             <include android:id="@+id/row_contact" layout="@layout/row_setting"
                 android:layout_width="match_parent" android:layout_height="wrap_content"/>
         </LinearLayout>

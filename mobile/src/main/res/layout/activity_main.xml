@@ -15,7 +15,6 @@
         android:background="@android:color/transparent"
         android:stateListAnimator="@null" app:elevation="0dp">
 
-        <!-- En-tête : logo + salutation + grille + avatar -->
         <LinearLayout android:id="@+id/header_row"
             android:layout_width="match_parent" android:layout_height="64dp"
             android:orientation="horizontal" android:gravity="center_vertical"
@@ -48,7 +47,6 @@
                 android:textColor="@color/white" android:textStyle="bold" android:textSize="16sp"/>
         </LinearLayout>
 
-        <!-- Carte abonnement -->
         <LinearLayout android:id="@+id/card_subscription"
             android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical"
@@ -91,6 +89,35 @@
             android:background="@drawable/bg_search"
             android:queryHint="Rechercher une chaîne, un film, une série…"
             android:iconifiedByDefault="false"/>
+
+        <Button
+            android:id="@+id/btn_watch_now"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginStart="14dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginEnd="14dp"
+            android:background="@drawable/btn_primary"
+            android:text="Regarder"
+            android:textAllCaps="false"
+            android:textColor="@color/white"
+            android:textStyle="bold"/>
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="4dp"
+            android:clipToPadding="false"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:scrollbars="none">
+            <LinearLayout
+                android:id="@+id/home_quick_strip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"/>
+        </HorizontalScrollView>
 
         <com.google.android.material.tabs.TabLayout
             android:id="@+id/tab_layout"

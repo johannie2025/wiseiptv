@@ -1,150 +1,121 @@
 package com.wdesign.wiseiptv.mobile.ui;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.ImageView;
-import android.widget.ProgressBar;
 import android.widget.TextView;
-import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
-import com.wdesign.wiseiptv.core.db.AppDatabase;
-import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
-import com.wdesign.wiseiptv.core.security.DeviceSecurity;
 import com.wdesign.wiseiptv.core.util.Fx;
 import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
 import com.wdesign.wiseiptv.mobile.R;
-import java.util.concurrent.Executors;
 
-/** Mon Compte : profil, abonnement, statistiques, clé appareil, alerte d'expiration. */
-public class AccountActivity extends AppCompatActivity {
-
-    private static final int ALERT_DAYS = 5;
-    private android.animation.ObjectAnimator renewPulse;
+public class SettingsActivity extends AppCompatActivity {
 
     @Override protected void onCreate(Bundle s) {
         super.onCreate(s);
-        setContentView(R.layout.activity_account);
-        NavHelper.bind(this, (BottomNavigationView) findViewById(R.id.bottom_nav), R.id.nav_account);
+        setContentView(R.layout.activity_settings);
 
-        final String key = DeviceSecurity.getOrCreateKey(this);
-        ((TextView) findViewById(R.id.tv_acc_key)).setText(key);
-        findViewById(R.id.btn_acc_copy).setOnClickListener(v -> {
-            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
-            Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
-        });
+        NavHelper.bind(this, (BottomNavigationView) findViewById(R.id.bottom_nav), R.id.nav_settings);
 
-        SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_MOBILE);
-        bindSubscription(si, key);
-        bindHelp(key);
-        loadStats();
-
-        Fx.stagger(40, 70,
-            findViewById(R.id.acc_title), findViewById(R.id.banner_expiry),
-            findViewById(R.id.card_profile), findViewById(R.id.card_sub),
-            findViewById(R.id.stats_row), findViewById(R.id.card_key), findViewById(R.id.row_help));
-        Fx.pressable(findViewById(R.id.btn_renew));
-        Fx.pressable(findViewById(R.id.row_help));
-    }
-
-    private void bindSubscription(SubscriptionInfo si, String key) {
-        TextView tvName   = findViewById(R.id.tv_name);
-        TextView tvAvatar = findViewById(R.id.tv_avatar);
-        TextView badge    = findViewById(R.id.tv_status_badge);
-        TextView status   = findViewById(R.id.tv_acc_status);
-        TextView expiry   = findViewById(R.id.tv_acc_expiry);
-        TextView days     = findViewById(R.id.tv_acc_days);
-        ImageView state   = findViewById(R.id.img_sub_state);
-        ProgressBar bar   = findViewById(R.id.acc_progress);
-        View banner       = findViewById(R.id.banner_expiry);
-
-        if (si == null) {
-            status.setText("Aucun abonnement actif");
-            state.setImageResource(R.drawable.ic_warning);
-            state.setColorFilter(0xFFFFD54F);
-            expiry.setText("Communiquez votre Device Key à votre revendeur.");
-            days.setVisibility(View.GONE);
-            bar.setVisibility(View.GONE);
-            badge.setText("Non activé");
-            return;
-        }
-
-        String name = si.displayName();
-        tvName.setText(name.isEmpty() ? "Appareil Wise IPTV" : name);
-        tvAvatar.setText(si.initial());
-        expiry.setText("Expire le : " + si.formattedExpiry());
-
-        if (si.active) {
-            badge.setText("Actif");
-            badge.setBackgroundResource(R.drawable.bg_badge_green);
-            status.setText("Abonnement Actif");
-            days.setText("Jours restants : " + si.daysLeft + (si.daysLeft > 1 ? " jours" : " jour"));
-            Fx.progressTo(bar, si.remainingPercent(), 900);
-        } else {
-            badge.setText("Expiré");
-            badge.setBackgroundResource(R.drawable.bg_badge_live);
-            status.setText("Abonnement expiré");
-            state.setImageResource(R.drawable.ic_warning);
-            state.setColorFilter(0xFFFFD54F);
-            days.setText("Jours restants : 0");
-            bar.setProgress(0);
-        }
-
-        if (si.isExpiringSoon(ALERT_DAYS)) {
-            banner.setVisibility(View.VISIBLE);
-            TextView t = findViewById(R.id.tv_alert_text);
-            t.setText(si.active
-                ? "Votre abonnement expire dans " + si.daysLeft + (si.daysLeft > 1 ? " jours !" : " jour !")
-                : "Votre abonnement a expiré !");
-            renewPulse = Fx.pulse(findViewById(R.id.btn_renew), 1.03f, 900);
-            findViewById(R.id.btn_renew).setOnClickListener(v -> openWhatsApp(
-                "Bonjour, je souhaite renouveler mon abonnement Wise IPTV. Device Key : " + key));
-        }
-    }
-
-    private void bindHelp(String key) {
-        View row = findViewById(R.id.row_help);
-        ((ImageView) row.findViewById(R.id.row_icon)).setImageResource(R.drawable.ic_chat);
-        ((TextView) row.findViewById(R.id.row_title)).setText("Besoin d'aide ?");
-        ((TextView) row.findViewById(R.id.row_sub)).setText("Contactez notre support WhatsApp");
-        row.setOnClickListener(v -> openWhatsApp("Bonjour, j'ai besoin d'aide avec Wise IPTV. Device Key : " + key));
-    }
-
-    private void loadStats() {
-        final AppDatabase db = AppDatabase.get(this);
-        Executors.newSingleThreadExecutor().execute(() -> {
-            final int live   = db.channelDao().countByType(ChannelEntity.TYPE_LIVE);
-            final int films  = db.channelDao().countByType(ChannelEntity.TYPE_FILM);
-            final int series = db.channelDao().countByType(ChannelEntity.TYPE_SERIES);
-            final int favs   = db.channelDao().countFavorites();
-            runOnUiThread(() -> {
-                if (isFinishing() || isDestroyed()) return;
-                Fx.countUp((TextView) findViewById(R.id.stat_live),   live,   800);
-                Fx.countUp((TextView) findViewById(R.id.stat_films),  films,  800);
-                Fx.countUp((TextView) findViewById(R.id.stat_series), series, 800);
-                Fx.countUp((TextView) findViewById(R.id.stat_favs),   favs,   800);
+        View rAccount = bindRow(R.id.row_account, R.drawable.ic_person, "Mon compte",
+            "Abonnement et clé de l'appareil",
+            () -> startActivity(new Intent(this, AccountActivity.class)));
+        View rAppearance = bindRow(R.id.row_appearance, R.drawable.ic_palette, "Apparence",
+            currentSetting("appearance", "Sombre"), () -> showChoiceDialog(R.id.row_appearance, "Apparence",
+                "appearance", new String[]{"Sombre","Clair","Auto"}, new String[]{"Sombre","Clair","Auto"}, "Sombre")));
+        View rLanguage = bindRow(R.id.row_language, R.drawable.ic_language, "Langue",
+            currentSetting("language", "Français"), () -> showChoiceDialog(R.id.row_language, "Langue",
+                "language", new String[]{"Français","English","العربية"}, new String[]{"Français","English","العربية"}, "Français")));
+        View rParental = bindRow(R.id.row_parental, R.drawable.ic_shield, "Contrôle parental",
+            currentSetting("parental", "Désactivé"), () -> showChoiceDialog(R.id.row_parental, "Contrôle parental",
+                "parental", new String[]{"Désactivé","Actif","Enfant"}, new String[]{"Désactivé","Actif","Enfant"}, "Désactivé")));
+        View rNetwork = bindRow(R.id.row_network, R.drawable.ic_signal, "Qualité réseau",
+            currentSetting("network", "Automatique"), () -> showChoiceDialog(R.id.row_network, "Qualité réseau",
+                "network", new String[]{"Automatique","Faible","Moyenne","Haute"}, new String[]{"Automatique","Faible","Moyenne","Haute"}, "Automatique")));
+        View rVideo = bindRow(R.id.row_video, R.drawable.ic_play, "Lecteur vidéo",
+            currentSetting("video", "Complet"), () -> showChoiceDialog(R.id.row_video, "Lecteur vidéo",
+                "video", new String[]{"Complet","Compact","HD uniquement"}, new String[]{"Complet","Compact","HD uniquement"}, "Complet")));
+        View rGrid = bindRow(R.id.row_grid, R.drawable.ic_grid, "Disposition",
+            gridColumns() + " colonnes", this::showGridDialog);
+        View rRefresh = bindRow(R.id.row_refresh, R.drawable.ic_refresh, "Actualiser les chaînes",
+            "Rafraîchir manuellement", () -> {
+                Intent i = new Intent(this, MainActivity.class);
+                i.putExtra(MainActivity.EXTRA_FORCE_SYNC, true);
+                i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(i);
+                finish();
             });
-        });
+        View rSupport = bindRow(R.id.row_support, R.drawable.ic_chat, "Support WhatsApp",
+            "Obtenir de l'aide rapidement", this::openWhatsApp);
+        View rAbout = bindRow(R.id.row_about, R.drawable.ic_info, "À propos",
+            "Wise IPTV — Solutions Premium OTT & Panel Revendeur",
+            () -> startActivity(new Intent(this, AboutActivity.class)));
+
+        Fx.stagger(60, 55, rAccount, rAppearance, rLanguage, rParental, rNetwork, rVideo, rGrid, rRefresh, rSupport, rAbout);
+        Fx.pressable(rAccount); Fx.pressable(rAppearance); Fx.pressable(rLanguage); Fx.pressable(rParental);
+        Fx.pressable(rNetwork); Fx.pressable(rVideo); Fx.pressable(rGrid); Fx.pressable(rRefresh);
+        Fx.pressable(rSupport); Fx.pressable(rAbout);
     }
 
-    @Override protected void onDestroy() {
-        if (renewPulse != null) renewPulse.cancel();
-        super.onDestroy();
+    private View bindRow(int includeId, int icon, String title, String sub, Runnable action) {
+        View row = findViewById(includeId);
+        ((ImageView) row.findViewById(R.id.row_icon)).setImageResource(icon);
+        ((TextView) row.findViewById(R.id.row_title)).setText(title);
+        ((TextView) row.findViewById(R.id.row_sub)).setText(sub);
+        row.setOnClickListener(v -> action.run());
+        return row;
     }
 
-    private void openWhatsApp(String message) {
-        try {
-            Uri u = Uri.parse("https://wa.me/" + SubscriptionInfo.WHATSAPP
-                + "?text=" + Uri.encode(message));
-            startActivity(new Intent(Intent.ACTION_VIEW, u));
-        } catch (Exception e) {
-            Toast.makeText(this, "WhatsApp indisponible", Toast.LENGTH_SHORT).show();
+    private String currentSetting(String key, String defaultValue) {
+        String value = getSharedPreferences("wise_settings", MODE_PRIVATE).getString(key, defaultValue);
+        return value == null || value.trim().isEmpty() ? defaultValue : value;
+    }
+
+    private void showChoiceDialog(int rowId, String title, String prefKey, String[] values, String[] labels, String defaultValue) {
+        SharedPreferences prefs = getSharedPreferences("wise_settings", MODE_PRIVATE);
+        String current = prefs.getString(prefKey, defaultValue);
+        int selected = 0;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(current)) {
+                selected = i;
+                break;
+            }
         }
+        new android.app.AlertDialog.Builder(this)
+            .setTitle(title)
+            .setSingleChoiceItems(labels, selected, (d, which) -> {
+                prefs.edit().putString(prefKey, values[which]).apply();
+                ((TextView) findViewById(rowId).findViewById(R.id.row_sub)).setText(labels[which]);
+                d.dismiss();
+            }).show();
+    }
+
+    private int gridColumns() {
+        int c = getSharedPreferences("wise_display", MODE_PRIVATE).getInt("grid_columns", 3);
+        return Math.max(2, Math.min(5, c));
+    }
+
+    private void showGridDialog() {
+        String[] items = {"2 colonnes", "3 colonnes", "4 colonnes", "5 colonnes"};
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Disposition")
+            .setSingleChoiceItems(items, gridColumns() - 2, (d, which) -> {
+                SharedPreferences p = getSharedPreferences("wise_display", MODE_PRIVATE);
+                p.edit().putInt("grid_columns", which + 2).apply();
+                ((TextView) findViewById(R.id.row_grid).findViewById(R.id.row_sub))
+                    .setText((which + 2) + " colonnes");
+                d.dismiss();
+            }).show();
+    }
+
+    private void openWhatsApp() {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://wa.me/" + SubscriptionInfo.WHATSAPP)));
+        } catch (Exception ignored) { }
     }
 }

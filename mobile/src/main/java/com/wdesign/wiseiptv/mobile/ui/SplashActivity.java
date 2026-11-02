@@ -1,29 +1,21 @@
 package com.wdesign.wiseiptv.mobile.ui;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.ObjectAnimator;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
-import android.view.animation.DecelerateInterpolator;
-import android.view.animation.OvershootInterpolator;
-import android.widget.ProgressBar;
+import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.wdesign.wiseiptv.core.util.Fx;
 import com.wdesign.wiseiptv.mobile.R;
 
-/**
- * SplashActivity — écran de démarrage animé (logo, halo, barre de chargement),
- * puis ouverture de ActivationActivity (qui bascule vers MainActivity si déjà activé).
- */
 public class SplashActivity extends AppCompatActivity {
 
     private static final long SPLASH_MS = 2000;
-
-    private ObjectAnimator glowPulse;
-    private ObjectAnimator progressAnim;
+    private android.animation.ObjectAnimator progressAnim;
     private boolean left = false;
 
     @Override
@@ -31,36 +23,26 @@ public class SplashActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_splash);
 
-        View logo      = findViewById(R.id.splash_logo);
-        View glow      = findViewById(R.id.splash_glow);
-        View title     = findViewById(R.id.splash_title);
-        View tagline   = findViewById(R.id.splash_tagline);
-        View footer    = findViewById(R.id.splash_footer);
-        ProgressBar pb = findViewById(R.id.splash_progress);
-        TextView ver   = findViewById(R.id.splash_version);
+        View logo = findViewById(R.id.splash_logo);
+        View title = findViewById(R.id.splash_title);
+        View tagline = findViewById(R.id.splash_tagline);
+        View footer = findViewById(R.id.splash_footer);
+        android.widget.ProgressBar pb = findViewById(R.id.splash_progress);
+        TextView ver = findViewById(R.id.splash_version);
 
         ver.setText("Wise IPTV v" + versionName());
-
-        // Logo : zoom + fondu avec léger rebond
         logo.setAlpha(0f);
         logo.setScaleX(0.55f);
         logo.setScaleY(0.55f);
         logo.animate().alpha(1f).scaleX(1f).scaleY(1f)
-            .setDuration(700).setInterpolator(new OvershootInterpolator(1.4f)).start();
-
-        // Halo qui respire
-        glow.setAlpha(0f);
-        glow.animate().alpha(1f).setDuration(900).start();
-        glowPulse = Fx.pulse(glow, 1.12f, 1400);
+            .setDuration(700).setInterpolator(new android.view.animation.OvershootInterpolator(1.4f)).start();
 
         Fx.stagger(450, 160, title, tagline, footer);
-
-        // Barre de chargement 0 → 100 %, puis passage à l'activation
-        progressAnim = ObjectAnimator.ofInt(pb, "progress", 0, 100);
+        progressAnim = android.animation.ObjectAnimator.ofInt(pb, "progress", 0, 100);
         progressAnim.setDuration(SPLASH_MS);
-        progressAnim.setInterpolator(new DecelerateInterpolator(1.2f));
-        progressAnim.addListener(new AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(Animator animation) {
+        progressAnim.setInterpolator(new android.view.animation.DecelerateInterpolator(1.2f));
+        progressAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator animation) {
                 if (!left) goNext();
             }
         });
@@ -86,7 +68,6 @@ public class SplashActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         left = true;
-        if (glowPulse != null) glowPulse.cancel();
         if (progressAnim != null) progressAnim.cancel();
         super.onDestroy();
     }

@@ -1,189 +1,171 @@
-<?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent" android:layout_height="match_parent"
-    android:background="@drawable/bg_app_gradient">
+package com.wdesign.wiseiptv.mobile.ui;
 
-    <ScrollView android:layout_width="match_parent" android:layout_height="match_parent"
-        android:scrollbars="none" android:clipToPadding="false"
-        android:paddingBottom="80dp">
-        <LinearLayout android:id="@+id/acc_content"
-            android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:orientation="vertical" android:padding="16dp">
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.wdesign.wiseiptv.core.db.AppDatabase;
+import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
+import com.wdesign.wiseiptv.core.security.DeviceSecurity;
+import com.wdesign.wiseiptv.core.util.Fx;
+import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
+import com.wdesign.wiseiptv.mobile.R;
+import java.util.concurrent.Executors;
 
-            <TextView android:id="@+id/acc_title"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:text="Mon compte" style="@style/Wise.Title"
-                android:layout_marginTop="6dp" android:layout_marginBottom="14dp"/>
+public class AccountActivity extends AppCompatActivity {
 
-            <!-- Alerte expiration -->
-            <LinearLayout android:id="@+id/banner_expiry"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:background="@drawable/bg_alert"
-                android:padding="14dp" android:layout_marginBottom="14dp"
-                android:visibility="gone">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:gravity="center_vertical">
-                    <ImageView android:layout_width="24dp" android:layout_height="24dp"
-                        android:src="@drawable/ic_warning" android:tint="#FFD54F"
-                        android:contentDescription="@null"/>
-                    <TextView android:id="@+id/tv_alert_text"
-                        android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:layout_marginStart="10dp"
-                        android:textColor="@color/white" android:textSize="14sp" android:textStyle="bold"/>
-                </LinearLayout>
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:text="Renouvelez maintenant pour éviter toute interruption de service."
-                    android:textColor="#F2C9D0" android:textSize="12sp"
-                    android:layout_marginTop="6dp" android:layout_marginBottom="12dp"/>
-                <androidx.appcompat.widget.AppCompatButton android:id="@+id/btn_renew"
-                    style="@style/Wise.Button"
-                    android:layout_width="match_parent" android:layout_height="46dp"
-                    android:text="Renouveler maintenant" android:background="@drawable/btn_pink"/>
-            </LinearLayout>
+    private static final int ALERT_DAYS = 5;
+    private android.animation.ObjectAnimator renewPulse;
 
-            <!-- Profil -->
-            <LinearLayout android:id="@+id/card_profile"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="horizontal" android:gravity="center_vertical"
-                android:background="@drawable/bg_card" android:padding="16dp"
-                android:layout_marginBottom="12dp">
-                <TextView android:id="@+id/tv_avatar"
-                    android:layout_width="58dp" android:layout_height="58dp"
-                    android:gravity="center" android:background="@drawable/bg_avatar"
-                    android:text="W" android:textColor="@color/white"
-                    android:textStyle="bold" android:textSize="24sp"/>
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:orientation="vertical"
-                    android:layout_marginStart="14dp">
-                    <TextView android:id="@+id/tv_name"
-                        android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:text="Appareil Wise IPTV" android:textColor="@color/white"
-                        android:textSize="17sp" android:textStyle="bold"
-                        android:maxLines="1" android:ellipsize="end"/>
-                    <TextView android:id="@+id/tv_status_badge"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp" android:text="Non activé"
-                        android:background="@drawable/bg_badge_blue" android:textColor="@color/white"
-                        android:textSize="11sp" android:textStyle="bold"
-                        android:paddingStart="10dp" android:paddingEnd="10dp"
-                        android:paddingTop="3dp" android:paddingBottom="3dp"/>
-                </LinearLayout>
-            </LinearLayout>
+    @Override protected void onCreate(Bundle s) {
+        super.onCreate(s);
+        setContentView(R.layout.activity_account);
+        NavHelper.bind(this, (BottomNavigationView) findViewById(R.id.bottom_nav), R.id.nav_account);
 
-            <!-- Abonnement -->
-            <LinearLayout android:id="@+id/card_sub"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="vertical" android:background="@drawable/bg_card"
-                android:padding="16dp" android:layout_marginBottom="12dp">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="horizontal" android:gravity="center_vertical">
-                    <ImageView android:id="@+id/img_sub_state"
-                        android:layout_width="22dp" android:layout_height="22dp"
-                        android:src="@drawable/ic_check_circle" android:tint="@color/wise_green"
-                        android:contentDescription="@null"/>
-                    <TextView android:id="@+id/tv_acc_status"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp" android:text="Abonnement"
-                        android:textColor="@color/white" android:textSize="15sp" android:textStyle="bold"/>
-                </LinearLayout>
-                <TextView android:id="@+id/tv_acc_expiry"
-                    android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp" android:textColor="@color/text_secondary"
-                    android:textSize="13sp"/>
-                <TextView android:id="@+id/tv_acc_days"
-                    android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp" android:textColor="@color/white"
-                    android:textSize="13sp"/>
-                <ProgressBar android:id="@+id/acc_progress"
-                    style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="match_parent" android:layout_height="8dp"
-                    android:layout_marginTop="12dp" android:max="100" android:progress="0"
-                    android:progressDrawable="@drawable/progress_gradient"/>
-            </LinearLayout>
+        final String key = DeviceSecurity.getOrCreateKey(this);
+        ((TextView) findViewById(R.id.tv_acc_key)).setText(key);
+        findViewById(R.id.btn_acc_copy).setOnClickListener(v -> {
+            ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("device_key", key));
+            Toast.makeText(this, "Clé copiée !", Toast.LENGTH_SHORT).show();
+        });
 
-            <!-- Statistiques -->
-            <LinearLayout android:id="@+id/stats_row"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="horizontal" android:layout_marginBottom="12dp">
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
-                    android:background="@drawable/bg_card" android:padding="12dp"
-                    android:layout_marginEnd="6dp">
-                    <TextView android:id="@+id/stat_live" android:text="0"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
-                    <TextView android:text="Chaînes" style="@style/Wise.Label"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
-                    android:background="@drawable/bg_card" android:padding="12dp"
-                    android:layout_marginStart="3dp" android:layout_marginEnd="3dp">
-                    <TextView android:id="@+id/stat_films" android:text="0"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
-                    <TextView android:text="Films" style="@style/Wise.Label"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
-                    android:background="@drawable/bg_card" android:padding="12dp"
-                    android:layout_marginStart="3dp" android:layout_marginEnd="3dp">
-                    <TextView android:id="@+id/stat_series" android:text="0"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
-                    <TextView android:text="Séries" style="@style/Wise.Label"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:orientation="vertical" android:gravity="center"
-                    android:background="@drawable/bg_card" android:padding="12dp"
-                    android:layout_marginStart="6dp">
-                    <TextView android:id="@+id/stat_favs" android:text="0"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:textColor="@color/white" android:textSize="18sp" android:textStyle="bold"/>
-                    <TextView android:text="Favoris" style="@style/Wise.Label"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                </LinearLayout>
-            </LinearLayout>
+        SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_MOBILE);
+        bindSubscription(si, key);
+        bindHelp(key);
+        loadStats();
+        loadUsageMetrics();
 
-            <!-- Device key -->
-            <LinearLayout android:id="@+id/card_key"
-                android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="horizontal" android:gravity="center_vertical"
-                android:background="@drawable/bg_card" android:padding="14dp"
-                android:layout_marginBottom="12dp">
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:orientation="vertical">
-                    <TextView android:text="Device Key" style="@style/Wise.Label"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"/>
-                    <TextView android:id="@+id/tv_acc_key"
-                        android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:textColor="@color/wise_blue_light" android:textSize="20sp"
-                        android:fontFamily="monospace" android:letterSpacing="0.15"
-                        android:textStyle="bold"/>
-                </LinearLayout>
-                <androidx.appcompat.widget.AppCompatButton android:id="@+id/btn_acc_copy"
-                    style="@style/Wise.Button"
-                    android:layout_width="wrap_content" android:layout_height="40dp"
-                    android:paddingStart="18dp" android:paddingEnd="18dp"
-                    android:text="Copier" android:textSize="13sp"
-                    android:background="@drawable/btn_secondary"/>
-            </LinearLayout>
+        Fx.stagger(40, 70,
+            findViewById(R.id.acc_title), findViewById(R.id.banner_expiry),
+            findViewById(R.id.card_profile), findViewById(R.id.card_sub),
+            findViewById(R.id.stats_row), findViewById(R.id.card_key),
+            findViewById(R.id.usage_block), findViewById(R.id.history_block), findViewById(R.id.row_help));
+        Fx.pressable(findViewById(R.id.btn_renew));
+        Fx.pressable(findViewById(R.id.row_help));
+    }
 
-            <!-- Aide -->
-            <include android:id="@+id/row_help" layout="@layout/row_setting"
-                android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        </LinearLayout>
-    </ScrollView>
+    private void bindSubscription(SubscriptionInfo si, String key) {
+        TextView tvName = findViewById(R.id.tv_name);
+        TextView tvAvatar = findViewById(R.id.tv_avatar);
+        TextView badge = findViewById(R.id.tv_status_badge);
+        TextView status = findViewById(R.id.tv_acc_status);
+        TextView expiry = findViewById(R.id.tv_acc_expiry);
+        TextView days = findViewById(R.id.tv_acc_days);
+        ImageView state = findViewById(R.id.img_sub_state);
+        ProgressBar bar = findViewById(R.id.acc_progress);
+        View banner = findViewById(R.id.banner_expiry);
 
-    <com.google.android.material.bottomnavigation.BottomNavigationView
-        android:id="@+id/bottom_nav"
-        android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_gravity="bottom" android:background="@color/wise_surface"
-        android:elevation="10dp"
-        app:menu="@menu/bottom_nav_menu" app:labelVisibilityMode="labeled"
-        app:itemIconTint="@color/nav_selector" app:itemTextColor="@color/nav_selector"/>
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+        if (si == null) {
+            status.setText("Aucun abonnement actif");
+            state.setImageResource(R.drawable.ic_warning);
+            state.setColorFilter(0xFFFFD54F);
+            expiry.setText("Communiquez votre Device Key à votre revendeur.");
+            days.setVisibility(View.GONE);
+            bar.setVisibility(View.GONE);
+            badge.setText("Non activé");
+            return;
+        }
+
+        String name = si.displayName();
+        tvName.setText(name.isEmpty() ? "Appareil Wise IPTV" : name);
+        tvAvatar.setText(si.initial());
+        expiry.setText("Expire le : " + si.formattedExpiry());
+
+        if (si.active) {
+            badge.setText("Actif");
+            badge.setBackgroundResource(R.drawable.bg_badge_green);
+            status.setText("Abonnement Actif");
+            days.setText("Jours restants : " + si.daysLeft + (si.daysLeft > 1 ? " jours" : " jour"));
+            Fx.progressTo(bar, si.remainingPercent(), 900);
+        } else {
+            badge.setText("Expiré");
+            badge.setBackgroundResource(R.drawable.bg_badge_live);
+            status.setText("Abonnement expiré");
+            state.setImageResource(R.drawable.ic_warning);
+            state.setColorFilter(0xFFFFD54F);
+            days.setText("Jours restants : 0");
+            bar.setProgress(0);
+        }
+
+        if (si.isExpiringSoon(ALERT_DAYS)) {
+            banner.setVisibility(View.VISIBLE);
+            TextView t = findViewById(R.id.tv_alert_text);
+            t.setText(si.active
+                ? "Votre abonnement expire dans " + si.daysLeft + (si.daysLeft > 1 ? " jours !" : " jour !")
+                : "Votre abonnement a expiré !");
+            renewPulse = Fx.pulse(findViewById(R.id.btn_renew), 1.03f, 900);
+            findViewById(R.id.btn_renew).setOnClickListener(v -> openWhatsApp(
+                "Bonjour, je souhaite renouveler mon abonnement Wise IPTV. Device Key : " + key));
+        }
+    }
+
+    private void bindHelp(String key) {
+        View row = findViewById(R.id.row_help);
+        ((ImageView) row.findViewById(R.id.row_icon)).setImageResource(R.drawable.ic_chat);
+        ((TextView) row.findViewById(R.id.row_title)).setText("Besoin d'aide ?");
+        ((TextView) row.findViewById(R.id.row_sub)).setText("Contactez notre support WhatsApp");
+        row.setOnClickListener(v -> openWhatsApp("Bonjour, j'ai besoin d'aide avec Wise IPTV. Device Key : " + key));
+    }
+
+    private void loadStats() {
+        final AppDatabase db = AppDatabase.get(this);
+        Executors.newSingleThreadExecutor().execute(() -> {
+            final int live = db.channelDao().countByType(ChannelEntity.TYPE_LIVE);
+            final int films = db.channelDao().countByType(ChannelEntity.TYPE_FILM);
+            final int series = db.channelDao().countByType(ChannelEntity.TYPE_SERIES);
+            final int favs = db.channelDao().countFavorites();
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                Fx.countUp((TextView) findViewById(R.id.stat_live), live, 800);
+                Fx.countUp((TextView) findViewById(R.id.stat_films), films, 800);
+                Fx.countUp((TextView) findViewById(R.id.stat_series), series, 800);
+                Fx.countUp((TextView) findViewById(R.id.stat_favs), favs, 800);
+            });
+        });
+    }
+
+    private void loadUsageMetrics() {
+        SharedPreferences prefs = getSharedPreferences("wise_usage", MODE_PRIVATE);
+        long dataMb = prefs.getLong("data_mb_total", 128L);
+        String history = prefs.getString("subscription_history", "Aucun historique d'abonnement pour le moment.");
+
+        TextView dataUsed = findViewById(R.id.tv_data_used);
+        TextView dataLimit = findViewById(R.id.tv_data_limit);
+        TextView historyView = findViewById(R.id.tv_history_content);
+
+        dataUsed.setText(formatMb(dataMb));
+        dataLimit.setText("Plan : Illimité");
+        historyView.setText(history);
+    }
+
+    private String formatMb(long dataMb) {
+        if (dataMb < 1024) return dataMb + " Mo";
+        return String.format(java.util.Locale.getDefault(), "%.1f Go", dataMb / 1024.0f);
+    }
+
+    @Override protected void onDestroy() {
+        if (renewPulse != null) renewPulse.cancel();
+        super.onDestroy();
+    }
+
+    private void openWhatsApp(String message) {
+        try {
+            Uri u = Uri.parse("https://wa.me/" + SubscriptionInfo.WHATSAPP
+                + "?text=" + Uri.encode(message));
+            startActivity(new Intent(Intent.ACTION_VIEW, u));
+        } catch (Exception e) {
+            Toast.makeText(this, "WhatsApp indisponible", Toast.LENGTH_SHORT).show();
+        }
+    }
+}

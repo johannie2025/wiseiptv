@@ -18,8 +18,6 @@ public class AboutActivity extends AppCompatActivity {
     @Override protected void onCreate(Bundle s) {
         super.onCreate(s);
         setContentView(R.layout.activity_about);
-
-        // Sous-écran de Paramètres : on garde "Paramètres" actif dans la barre
         NavHelper.bind(this, (BottomNavigationView) findViewById(R.id.bottom_nav), R.id.nav_settings, true);
 
         String v = "2.0.0";
@@ -29,16 +27,23 @@ public class AboutActivity extends AppCompatActivity {
 
         View dev = bindRow(R.id.row_dev, R.drawable.ic_info, "Développé par W Design",
             "Agence d'Architecture · Design · Innovation", null);
-        View web = bindRow(R.id.row_web, R.drawable.ic_link, "Site web", "www.wdesign.ga", () ->
-            open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.wdesign.ga"))));
+        View web = bindRow(R.id.row_web, R.drawable.ic_link, "Site web",
+            "WiseIPTV — Solutions Premium OTT & Panel Revendeur", () ->
+                open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.wiseiptv.com"))));
+        View legal = bindRow(R.id.row_legal, R.drawable.ic_info, "Mentions légales",
+            "Consultez nos conditions d’utilisation", () ->
+                open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.wiseiptv.com/mentions-legales"))));
+        View privacy = bindRow(R.id.row_privacy, R.drawable.ic_lock, "Politique de confidentialité",
+            "Protection des données et cookies", () ->
+                open(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.wiseiptv.com/politique-de-confidentialite"))));
         View contact = bindRow(R.id.row_contact, R.drawable.ic_phone, "Nous contacter",
             "+240 222 886 007", () ->
-            open(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:+240222886007"))));
+                open(new Intent(Intent.ACTION_DIAL, Uri.parse("tel:+240222886007"))));
 
         glowPulse = Fx.pulse(findViewById(R.id.about_glow), 1.1f, 1600);
         Fx.pop(findViewById(R.id.about_logo));
-        Fx.stagger(150, 80, dev, web, contact);
-        Fx.pressable(web); Fx.pressable(contact);
+        Fx.stagger(150, 80, dev, web, legal, privacy, contact);
+        Fx.pressable(web); Fx.pressable(legal); Fx.pressable(privacy); Fx.pressable(contact);
     }
 
     private View bindRow(int includeId, int icon, String title, String sub, Runnable action) {
