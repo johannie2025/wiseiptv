@@ -449,4 +449,3 @@
         app:itemTextColor="@color/nav_selector" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
 
-</LinearLayout>
