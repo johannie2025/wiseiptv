@@ -40,9 +40,8 @@ public class TvAccountActivity extends AppCompatActivity {
             history.setText("Aucun historique");
         } else {
             status.setText(info.active ? "Actif" : "Expiré");
-            expiry.setText(info.formattedExpiry());
-            data.setText(info.dataUsedMb + " Mo");
-            history.setText(info.latestPlan != null ? info.latestPlan : "Aucun historique");
+            data.setText("Données actives");
+history.setText("Abonnement TV Standard");
         }
 
         Fx.focusZoom(renew, 1.04f);
