@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.Observer;
 import androidx.recyclerview.widget.*;
+import com.wdesign.wiseiptv.core.util.AdaptiveBg;
 import com.wdesign.wiseiptv.core.util.AppSettings;
 import com.wdesign.wiseiptv.mobile.util.ParentalControl;
 import com.wdesign.wiseiptv.mobile.util.ResumeStore;
@@ -78,6 +79,9 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private View                   homePanel;
     private TextView               heroTitle, heroSub, heroBadge;
     private ImageView              heroLogo;
+    private PlayerView             heroPreview;
+    private PlayerEngine           heroEngine;
+    private long                   heroPlayingId = -1;
     private LinearLayout           heroDots;
     private RecyclerView           rvHomeSlider;
     private ChannelAdapter         sliderAdapter;
@@ -103,7 +107,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             if (!showingHome || homeChannels.size() < 2) return;
             heroIndex = (heroIndex + 1) % Math.min(HERO_COUNT, homeChannels.size());
             bindHero();
-            heroHandler.postDelayed(this, 5000);
+            heroHandler.postDelayed(this, 12000);
         }
     };
 
@@ -125,6 +129,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         heroSub      = findViewById(R.id.hero_sub);
         heroBadge    = findViewById(R.id.hero_badge);
         heroLogo     = findViewById(R.id.hero_logo);
+        heroPreview  = findViewById(R.id.hero_preview);
         heroDots     = findViewById(R.id.hero_dots);
         rvHomeSlider = findViewById(R.id.rv_home_slider);
         cardSubscription  = findViewById(R.id.card_subscription);
@@ -144,7 +149,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         applyLayoutMode();
 
         // Slide horizontal des chaînes (accueil)
-        sliderAdapter = new ChannelAdapter(this, R.layout.item_channel_h);
+        sliderAdapter = new ChannelAdapter(this::selectHero, R.layout.item_channel_h);
         rvHomeSlider.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
         rvHomeSlider.setAdapter(sliderAdapter);
         findViewById(R.id.btn_watch).setOnClickListener(v -> {
@@ -442,7 +447,24 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     private void setupTabs() {
         String[] tabs = {"Tout","Live","Films","Séries","Favoris"};
-        for (String t : tabs) tabLayout.addTab(tabLayout.newTab().setText(t));
+        final android.content.res.ColorStateList colors = new android.content.res.ColorStateList(
+            new int[][]{{android.R.attr.state_selected}, {}},
+            new int[]{0xFFFFFFFF, 0xFF8FA6CC});
+        final int pad = Math.round(14 * getResources().getDisplayMetrics().density);
+        for (String t : tabs) {
+            TextView tv = new TextView(this);
+            tv.setText(t);
+            tv.setGravity(android.view.Gravity.CENTER);
+            tv.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+            tv.setTextColor(colors);
+            tv.setTextSize(14);
+            tv.setTypeface(null, android.graphics.Typeface.BOLD);
+            tv.setSingleLine(true);
+            tv.setPadding(pad, 0, pad, 0);
+            tv.setLayoutParams(new android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+            tabLayout.addTab(tabLayout.newTab().setCustomView(tv));
+        }
         tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override public void onTabSelected(TabLayout.Tab t) {
                 currentTab = t.getPosition();
@@ -489,6 +511,8 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         rvChannels.setVisibility(View.VISIBLE);
         cardSubscription.setVisibility(View.GONE);
         heroHandler.removeCallbacks(heroRotate);
+        if (heroEngine != null) heroEngine.pause();
+        AdaptiveBg.reset(findViewById(R.id.main_root));
     }
 
     private void showRecentHome() {
@@ -515,7 +539,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 heroDots.setVisibility(picks.isEmpty() ? View.GONE : View.VISIBLE);
                 bindHero();
                 heroHandler.removeCallbacks(heroRotate);
-                if (picks.size() > 1) heroHandler.postDelayed(heroRotate, 5000);
+                if (picks.size() > 1) heroHandler.postDelayed(heroRotate, 12000);
             });
         });
     }
@@ -573,7 +597,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private void bindHero() {
         if (homeChannels.isEmpty()) return;
         int n = Math.min(HERO_COUNT, homeChannels.size());
-        if (heroIndex >= n) heroIndex = 0;
+        if (heroIndex >= homeChannels.size()) heroIndex = 0;
         ChannelEntity c = homeChannels.get(heroIndex);
         heroTitle.setText(c.name);
         String sub = c.groupTitle != null && !c.groupTitle.isEmpty() ? c.groupTitle
@@ -584,6 +608,8 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         if (c.logoUrl != null && !c.logoUrl.isEmpty())
             Glide.with(this).load(c.logoUrl).fitCenter().placeholder(R.drawable.ic_channel_placeholder).into(heroLogo);
         else heroLogo.setImageResource(R.drawable.ic_channel_placeholder);
+        AdaptiveBg.apply(findViewById(R.id.main_root), c.logoUrl);
+        playHeroPreview(c);
         heroDots.removeAllViews();
         for (int i = 0; i < n; i++) {
             View d = new View(this);
@@ -594,6 +620,37 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             d.setBackgroundResource(i == heroIndex ? R.drawable.dot_on : R.drawable.dot_off);
             heroDots.addView(d);
         }
+    }
+
+    /** Le héros joue réellement le contenu de la chaîne sélectionnée (flux muet). */
+    private void playHeroPreview(ChannelEntity c) {
+        if (c.streamUrl == null || c.streamUrl.isEmpty()) return;
+        if (heroEngine == null) {
+            heroEngine = new PlayerEngine(this, new PlayerEngine.Listener() {
+                @Override public void onBuffering(boolean b) {}
+                @Override public void onPlaying() { runOnUiThread(() -> heroPreview.setVisibility(View.VISIBLE)); }
+                @Override public void onError(String message) { runOnUiThread(() -> heroPreview.setVisibility(View.INVISIBLE)); }
+            });
+            heroEngine.attachView(heroPreview);
+            heroEngine.setMuted(true);
+        }
+        if (heroPlayingId != c.id) {
+            heroPlayingId = c.id;
+            heroPreview.setVisibility(View.INVISIBLE);
+            heroEngine.play(c.streamUrl);
+        } else if (!heroEngine.isPlaying()) {
+            heroEngine.resume();
+        }
+    }
+
+    /** Toucher une vignette du slide la lance dans le héros ; un second toucher ouvre le lecteur. */
+    private void selectHero(ChannelEntity ch) {
+        int idx = -1;
+        for (int i = 0; i < homeChannels.size(); i++) if (homeChannels.get(i).id == ch.id) { idx = i; break; }
+        if (idx < 0 || idx == heroIndex) { onClick(ch); return; }
+        heroIndex = idx;
+        heroHandler.removeCallbacks(heroRotate);
+        bindHero();
     }
 
     private void saveRecent(ChannelEntity channel) {
@@ -731,6 +788,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     @Override
     public void onClick(ChannelEntity ch) {
+        if (heroEngine != null) heroEngine.pause();
         saveRecent(ch);
         startActivity(playerIntent(ch));
     }
@@ -749,12 +807,15 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     @Override protected void onPause() {
         heroHandler.removeCallbacks(heroRotate);
+        if (heroEngine != null) heroEngine.pause();
         super.onPause();
     }
 
     @Override protected void onDestroy() {
         super.onDestroy();
         heroHandler.removeCallbacksAndMessages(null);
+        if (heroPreview != null) heroPreview.setPlayer(null);
+        if (heroEngine != null) { heroEngine.release(); heroEngine = null; }
         syncExecutor.shutdownNow();
     }
 }

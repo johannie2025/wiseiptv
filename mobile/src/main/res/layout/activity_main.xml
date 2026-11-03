@@ -2,6 +2,7 @@
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main_root"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@drawable/bg_app_gradient">
 
@@ -143,10 +144,18 @@
                             android:text="▶  Regarder" android:textSize="13sp"
                             android:background="@drawable/btn_watch"/>
                     </LinearLayout>
-                    <ImageView android:id="@+id/hero_logo"
-                        android:layout_width="96dp" android:layout_height="96dp"
-                        android:layout_marginStart="10dp" android:scaleType="fitCenter"
-                        android:contentDescription="@null"/>
+                    <FrameLayout android:layout_width="150dp" android:layout_height="100dp"
+                        android:layout_marginStart="10dp" android:background="@drawable/bg_card"
+                        android:clipToOutline="true">
+                        <ImageView android:id="@+id/hero_logo"
+                            android:layout_width="match_parent" android:layout_height="match_parent"
+                            android:padding="12dp" android:scaleType="fitCenter"
+                            android:contentDescription="@null"/>
+                        <androidx.media3.ui.PlayerView android:id="@+id/hero_preview"
+                            android:layout_width="match_parent" android:layout_height="match_parent"
+                            app:use_controller="false" app:resize_mode="zoom"
+                            android:visibility="invisible"/>
+                    </FrameLayout>
                 </LinearLayout>
 
                 <LinearLayout android:id="@+id/hero_dots"

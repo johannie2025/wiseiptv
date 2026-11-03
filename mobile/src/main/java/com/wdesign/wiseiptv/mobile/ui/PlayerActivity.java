@@ -18,7 +18,9 @@ import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.epg.EpgClient;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.util.AdaptiveBg;
 import com.wdesign.wiseiptv.core.util.AppSettings;
+import com.wdesign.wiseiptv.core.util.Recorder;
 import com.wdesign.wiseiptv.mobile.R;
 import com.wdesign.wiseiptv.mobile.adapter.ChannelAdapter;
 import com.wdesign.wiseiptv.mobile.util.ParentalControl;
@@ -61,6 +63,11 @@ public class PlayerActivity extends AppCompatActivity
     private TextView btnBackLive;
     private EpgClient.Source epgSource;
     private ChannelEntity current;
+    private final Recorder recorder = new Recorder();
+    private String playingUrl;
+    private TextView actRecLabel;
+    private ImageView actRecIcon;
+    private boolean orientationLocked;
     private AudioManager audioManager;
     private GestureDetector gestureDetector;
     private final ExecutorService zapExecutor = Executors.newSingleThreadExecutor();
@@ -116,6 +123,8 @@ public class PlayerActivity extends AppCompatActivity
         rvSimilar      = findViewById(R.id.rv_similar);
         epgList        = findViewById(R.id.epg_list);
         btnBackLive    = findViewById(R.id.btn_back_live);
+        actRecLabel    = findViewById(R.id.act_rec_label);
+        actRecIcon     = findViewById(R.id.act_rec_icon);
         btnBackLive.setOnClickListener(v -> backToLive());
 
         similarAdapter = new ChannelAdapter(this, R.layout.item_channel_h);
@@ -131,8 +140,7 @@ public class PlayerActivity extends AppCompatActivity
         btnFav.setOnClickListener(v -> toggleFav());
         findViewById(R.id.act_fav).setOnClickListener(v -> toggleFav());
         findViewById(R.id.act_share).setOnClickListener(v -> shareChannel());
-        findViewById(R.id.act_record).setOnClickListener(v -> Toast.makeText(this,
-            "L'enregistrement n'est pas encore disponible.", Toast.LENGTH_SHORT).show());
+        findViewById(R.id.act_record).setOnClickListener(v -> toggleRecord());
         findViewById(R.id.act_info).setOnClickListener(v -> showInfoDialog());
         findViewById(R.id.btn_similar_all).setOnClickListener(v -> {
             Intent i = new Intent(this, MainActivity.class);
@@ -155,6 +163,7 @@ public class PlayerActivity extends AppCompatActivity
 
         engine = new PlayerEngine(this, this);
         engine.attachView(playerView);
+        playingUrl = streamUrl;
         engine.play(streamUrl);
         tvQuality.setText(PlayerEngine.QUALITY_LABELS[engine.getQuality()]);
         long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
@@ -181,15 +190,21 @@ public class PlayerActivity extends AppCompatActivity
     private void setFullscreen(boolean on, boolean forceOrientation) {
         fullscreen = on;
         if (forceOrientation) {
+            // Bascule immédiate et verrouillée : paysage tant qu'on est en plein écran,
+            // portrait à la sortie. Le capteur n'est rendu qu'une fois la rotation effective.
+            orientationLocked = true;
             setRequestedOrientation(on ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                                        : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            // Rend la main au capteur après la rotation
-            osdHandler.postDelayed(() -> {
-                if (!isFinishing()) setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-            }, 1800);
+            if (!on) osdHandler.postDelayed(this::releaseOrientation, 1200);
         }
         applyLayoutForMode();
         persistState();
+    }
+
+    private void releaseOrientation() {
+        if (isFinishing() || isDestroyed() || fullscreen) return;
+        orientationLocked = false;
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
 
     private void applyLayoutForMode() {
@@ -221,6 +236,7 @@ public class PlayerActivity extends AppCompatActivity
     @Override public void onConfigurationChanged(Configuration c) {
         super.onConfigurationChanged(c);
         boolean land = c.orientation == Configuration.ORIENTATION_LANDSCAPE;
+        if (orientationLocked) { if (land == fullscreen) applyLayoutForMode(); return; }
         if (land != fullscreen) setFullscreen(land, false);
     }
 
@@ -334,6 +350,7 @@ public class PlayerActivity extends AppCompatActivity
         bindChannelViews();
         tvChannelName.setAlpha(0f);
         tvChannelName.animate().alpha(1).setDuration(160).start();
+        playingUrl = streamUrl;
         engine.play(streamUrl);
         showOsd();
         loadFavState();
@@ -366,7 +383,10 @@ public class PlayerActivity extends AppCompatActivity
         epgEmpty.setVisibility(View.VISIBLE);
         ((TextView) epgEmpty).setText("Chargement du programme…");
         final long id = channelId;
-        EpgClient.load(streamUrl, new EpgClient.Callback() {
+        zapExecutor.execute(() -> {
+            ChannelEntity full = db.channelDao().findById(id);
+            final ChannelEntity ch = full != null ? full : channelStub();
+            runOnUiThread(() -> { if (isFinishing() || isDestroyed() || id != channelId) return; EpgClient.load(this, ch, new EpgClient.Callback() {
             @Override public void onResult(List<EpgClient.Program> programs, EpgClient.Source source) {
                 if (isFinishing() || isDestroyed() || id != channelId) return;
                 epgSource = source;
@@ -378,7 +398,16 @@ public class PlayerActivity extends AppCompatActivity
                 ((TextView) epgEmpty).setText(message);
                 epgEmpty.setVisibility(View.VISIBLE);
             }
+        }); });
         });
+    }
+
+    /** Chaîne minimale (URL + nom) pour le guide quand la fiche complète n'est pas encore chargée. */
+    private ChannelEntity channelStub() {
+        ChannelEntity c = new ChannelEntity();
+        c.id = channelId; c.name = channelName == null ? "" : channelName;
+        c.streamUrl = streamUrl; c.groupTitle = groupTitle; c.contentType = contentType;
+        return c;
     }
 
     private void renderEpg(List<EpgClient.Program> list) {
@@ -412,7 +441,8 @@ public class PlayerActivity extends AppCompatActivity
             replaying = true;
             paused = false;
             btnPlayPause.setImageResource(R.drawable.ic_pause);
-            engine.play(EpgClient.replayUrl(epgSource, p));
+            playingUrl = EpgClient.replayUrl(epgSource, p);
+            engine.play(playingUrl);
             infoGroup.setText("Replay · " + p.title);
             infoGroup.setVisibility(View.VISIBLE);
             infoBadge.setVisibility(View.GONE);
@@ -431,6 +461,7 @@ public class PlayerActivity extends AppCompatActivity
         replaying = false;
         paused = false;
         btnPlayPause.setImageResource(R.drawable.ic_pause);
+        playingUrl = streamUrl;
         engine.play(streamUrl);
         bindChannelViews();
     }
@@ -445,12 +476,44 @@ public class PlayerActivity extends AppCompatActivity
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || id != channelId) return;
                 current = cur;
+                AdaptiveBg.apply(findViewById(R.id.player_root), cur != null ? cur.logoUrl : null);
                 similarAdapter.setData(out);
                 int vis = out.isEmpty() ? View.GONE : View.VISIBLE;
                 similarHeader.setVisibility(vis);
                 rvSimilar.setVisibility(vis);
             });
         });
+    }
+
+    // ── Enregistrement ────────────────────────────────────────────
+
+    private void toggleRecord() {
+        if (recorder.isRecording()) { recorder.stop(); return; }
+        if (playingUrl == null || playingUrl.isEmpty()) return;
+        recorder.start(this, playingUrl, channelName, new Recorder.Listener() {
+            @Override public void onStarted(java.io.File file) {
+                runOnUiThread(() -> {
+                    setRecordingUi(true);
+                    Toast.makeText(PlayerActivity.this, "⏺ Enregistrement démarré", Toast.LENGTH_SHORT).show();
+                });
+            }
+            @Override public void onFinished(java.io.File file, long bytes, String error) {
+                runOnUiThread(() -> {
+                    setRecordingUi(false);
+                    if (isDestroyed()) return;
+                    String msg = error != null ? "Enregistrement interrompu : " + error
+                        : bytes > 0 ? "✅ Enregistré (" + com.wdesign.wiseiptv.core.util.DataUsage.format(bytes)
+                            + ") : " + file.getName() + "\nDossier : Films/WiseIPTV de l'application"
+                        : "Rien n'a été enregistré.";
+                    Toast.makeText(PlayerActivity.this, msg, Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private void setRecordingUi(boolean on) {
+        if (actRecLabel != null) actRecLabel.setText(on ? "Arrêter" : "Enregistrer");
+        if (actRecIcon != null) actRecIcon.setColorFilter(on ? 0xFFE5324F : 0xFFFFFFFF);
     }
 
     private void showInfoDialog() {
@@ -542,6 +605,7 @@ public class PlayerActivity extends AppCompatActivity
         // Fermeture volontaire du lecteur (retour) → la reprise se fera sur l'accueil
         if (isFinishing()) ResumeStore.setScreen(this, ResumeStore.SCREEN_MAIN);
         super.onDestroy(); osdHandler.removeCallbacksAndMessages(null);
+        recorder.stop();
         zapExecutor.shutdownNow();
         if (engine != null) { engine.release(); engine = null; }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);

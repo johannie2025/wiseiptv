@@ -165,9 +165,9 @@
                     <TextView style="@style/Wise.ActionLabel" android:text="Partager"/>
                 </LinearLayout>
                 <LinearLayout android:id="@+id/act_record" style="@style/Wise.Action">
-                    <ImageView android:layout_width="24dp" android:layout_height="24dp"
+                    <ImageView android:id="@+id/act_rec_icon" android:layout_width="24dp" android:layout_height="24dp"
                         android:src="@drawable/ic_record" android:tint="@color/white" android:contentDescription="@null"/>
-                    <TextView style="@style/Wise.ActionLabel" android:text="Enregistrer"/>
+                    <TextView android:id="@+id/act_rec_label" style="@style/Wise.ActionLabel" android:text="Enregistrer"/>
                 </LinearLayout>
                 <LinearLayout android:id="@+id/act_info" style="@style/Wise.Action">
                     <ImageView android:layout_width="24dp" android:layout_height="24dp"
