@@ -48,7 +48,7 @@
         <!-- Hint zapping -->
         <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="◄ Chaîne précédente    ▲▼ Qualité    Chaîne suivante ►"
+            android:text="◄ Chaîne précédente    ▲▼ Qualité    ● Rouge : enregistrer    Chaîne suivante ►"
             android:gravity="center" android:textColor="#88FFFFFF" android:textSize="12sp"/>
     </LinearLayout>
 </FrameLayout>

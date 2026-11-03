@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main_root"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@drawable/bg_app_gradient">
 
@@ -98,6 +99,12 @@
                         <TextView android:id="@+id/btn_fav"
                             android:layout_width="wrap_content" android:layout_height="48dp"
                             android:layout_marginStart="12dp" android:gravity="center" android:text="♡  Favori"
+                            android:textColor="@color/white" android:textSize="16sp"
+                            android:paddingStart="22dp" android:paddingEnd="22dp"
+                            android:background="@drawable/bg_tv_card_focus" android:focusable="true" android:clickable="true"/>
+                        <TextView android:id="@+id/btn_rec"
+                            android:layout_width="wrap_content" android:layout_height="48dp"
+                            android:layout_marginStart="12dp" android:gravity="center" android:text="⏺  Enregistrer"
                             android:textColor="@color/white" android:textSize="16sp"
                             android:paddingStart="22dp" android:paddingEnd="22dp"
                             android:background="@drawable/bg_tv_card_focus" android:focusable="true" android:clickable="true"/>

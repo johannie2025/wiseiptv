@@ -39,7 +39,9 @@ import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.epg.EpgClient;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.util.AdaptiveBg;
 import com.wdesign.wiseiptv.core.util.AppSettings;
+import com.wdesign.wiseiptv.core.util.Recorder;
 import com.wdesign.wiseiptv.core.util.DataUsage;
 import com.wdesign.wiseiptv.core.util.Fx;
 import com.wdesign.wiseiptv.core.util.LegalTexts;
@@ -88,6 +90,8 @@ public class TvMainActivity extends FragmentActivity {
     // Vues
     private LinearLayout navItems, pageContent, epgList;
     private View panelBrowse, panelPage, btnWatch, btnFav, btnLive;
+    private TextView btnRec;
+    private final Recorder recorder = new Recorder();
     private TextView tvListTitle, tvInfoName, tvInfoGroup, tvEpgEmpty, tvSyncStatus, tvEmpty,
         tvPreviewLive, tvSubPill;
     private ProgressBar progressBar, previewLoading;
@@ -122,6 +126,8 @@ public class TvMainActivity extends FragmentActivity {
         btnWatch     = findViewById(R.id.btn_watch);
         btnFav       = findViewById(R.id.btn_fav);
         btnLive      = findViewById(R.id.btn_live);
+        btnRec       = findViewById(R.id.btn_rec);
+        btnRec.setOnClickListener(v -> toggleRecord());
         tvListTitle  = findViewById(R.id.tv_list_title);
         tvInfoName   = findViewById(R.id.tv_info_name);
         tvInfoGroup  = findViewById(R.id.tv_info_group);
@@ -195,6 +201,7 @@ public class TvMainActivity extends FragmentActivity {
             loadBrowse(s);
         } else {
             stopPreview();
+            AdaptiveBg.reset(findViewById(R.id.main_root));
             panelBrowse.setVisibility(View.GONE);
             tvEmpty.setVisibility(View.GONE);
             panelPage.setVisibility(View.VISIBLE);
@@ -282,6 +289,7 @@ public class TvMainActivity extends FragmentActivity {
         if (ch == null) return;
         boolean changed = selected == null || selected.id != ch.id;
         selected = ch;
+        if (changed) AdaptiveBg.apply(findViewById(R.id.main_root), ch.logoUrl);
         getSharedPreferences(PREFS_STATE, MODE_PRIVATE).edit().putLong("last_channel", ch.id).apply();
         tvInfoName.setText(ch.name);
         tvInfoGroup.setText(ch.groupTitle == null ? "" : ch.groupTitle);
@@ -340,7 +348,7 @@ public class TvMainActivity extends FragmentActivity {
         epgList.removeAllViews();
         tvEpgEmpty.setVisibility(View.VISIBLE);
         tvEpgEmpty.setText("Chargement du programme…");
-        EpgClient.load(ch.streamUrl, new EpgClient.Callback() {
+        EpgClient.load(this, ch, new EpgClient.Callback() {
             @Override public void onResult(List<EpgClient.Program> programs, EpgClient.Source source) {
                 if (isFinishing() || isDestroyed() || selected == null || selected.id != ch.id) return;
                 epgSource = source;
@@ -410,6 +418,29 @@ public class TvMainActivity extends FragmentActivity {
             && AppSettings.liveBadges(this) ? View.VISIBLE : View.GONE);
         if (previewEngine != null) previewEngine.setMuted(true);
         playPreview(previewUrl);
+    }
+
+    private void toggleRecord() {
+        if (recorder.isRecording()) { recorder.stop(); return; }
+        final String url = previewUrl != null ? previewUrl : (selected != null ? selected.streamUrl : null);
+        if (url == null || url.isEmpty() || selected == null) return;
+        recorder.start(this, url, selected.name, new Recorder.Listener() {
+            @Override public void onStarted(java.io.File file) {
+                runOnUiThread(() -> {
+                    btnRec.setText("⏹  Arrêter");
+                    toast("⏺ Enregistrement démarré");
+                });
+            }
+            @Override public void onFinished(java.io.File file, long bytes, String error) {
+                runOnUiThread(() -> {
+                    btnRec.setText("⏺  Enregistrer");
+                    if (isDestroyed()) return;
+                    Toast.makeText(TvMainActivity.this, error != null ? "Enregistrement interrompu : " + error
+                        : bytes > 0 ? "✅ Enregistré : " + file.getName() + "\nDossier : Films/WiseIPTV de l'application"
+                        : "Rien n'a été enregistré.", Toast.LENGTH_LONG).show();
+                });
+            }
+        });
     }
 
     private void toggleFavorite() {
@@ -1040,6 +1071,7 @@ public class TvMainActivity extends FragmentActivity {
         if (logoPulse != null) logoPulse.cancel();
         if (previewView != null) previewView.setPlayer(null);
         if (previewEngine != null) { previewEngine.release(); previewEngine = null; }
+        recorder.stop();
         io.shutdown();
         super.onDestroy();
     }

@@ -12,6 +12,7 @@ import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.epg.EpgClient;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
 import com.wdesign.wiseiptv.core.util.DataUsage;
+import com.wdesign.wiseiptv.core.util.Recorder;
 import java.util.List;
 import com.wdesign.wiseiptv.tv.R;
 import java.util.concurrent.Executors;
@@ -29,6 +30,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
     private PlayerView playerView;
     private PlayerEngine engine;
     private TextView tvName, tvQuality, tvStatus, tvGroup, tvNow;
+    private final Recorder recorder = new Recorder();
     private ProgressBar progressBar;
     private View osd;
     private AppDatabase db;
@@ -89,7 +91,10 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         tvNow.setVisibility(View.GONE);
         if (streamUrl == null || streamUrl.contains("/timeshift/")) return;
         final long id = channelId;
-        EpgClient.load(streamUrl, new EpgClient.Callback() {
+        ChannelEntity stub = new ChannelEntity();
+        stub.id = channelId; stub.name = channelName == null ? "" : channelName;
+        stub.streamUrl = streamUrl; stub.groupTitle = groupTitle; stub.contentType = contentType;
+        EpgClient.load(this, stub, new EpgClient.Callback() {
             @Override public void onResult(List<EpgClient.Program> programs, EpgClient.Source source) {
                 if (isFinishing() || isDestroyed() || id != channelId || programs == null) return;
                 long now = System.currentTimeMillis() / 1000;
@@ -169,9 +174,30 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
                 int q = Math.max(engine.getQuality()-1, 0);
                 engine.setQuality(q); tvQuality.setText(PlayerEngine.QUALITY_LABELS[q]); return true; }
 
+            case KeyEvent.KEYCODE_PROG_RED:
+            case KeyEvent.KEYCODE_MEDIA_RECORD:
+                toggleRecord(); return true;
             case KeyEvent.KEYCODE_BACK: saveState(false); finish(); return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    private void toggleRecord() {
+        if (recorder.isRecording()) { recorder.stop(); return; }
+        recorder.start(this, streamUrl, channelName, new Recorder.Listener() {
+            @Override public void onStarted(java.io.File f) {
+                runOnUiThread(() -> { tvStatus.setText("⏺ REC"); tvStatus.setVisibility(View.VISIBLE); });
+            }
+            @Override public void onFinished(java.io.File f, long bytes, String error) {
+                runOnUiThread(() -> {
+                    tvStatus.setVisibility(View.GONE);
+                    if (isDestroyed()) return;
+                    Toast.makeText(TvPlayerActivity.this, error != null ? "Enregistrement interrompu : " + error
+                        : bytes > 0 ? "✅ Enregistré : " + f.getName() : "Rien n'a été enregistré.",
+                        Toast.LENGTH_LONG).show();
+                });
+            }
+        });
     }
 
     private void showOsd() {
@@ -184,6 +210,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         DataUsage.flush(this);
     }
     @Override protected void onDestroy() {
+        recorder.stop();
         super.onDestroy(); osdHandler.removeCallbacksAndMessages(null);
         if (engine != null) { engine.release(); engine = null; }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
