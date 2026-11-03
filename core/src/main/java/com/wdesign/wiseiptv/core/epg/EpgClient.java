@@ -1,6 +1,8 @@
 package com.wdesign.wiseiptv.core.epg;
 
+import android.content.Context;
 import android.os.Handler;
+import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import android.os.Looper;
 import android.util.Base64;
 import java.io.BufferedReader;
@@ -31,7 +33,7 @@ public final class EpgClient {
 
     private static final Pattern STREAM = Pattern.compile(
         "^(https?://[^/]+)/(?:live/)?([^/]+)/([^/]+)/(\\d+)(?:\\.\\w+)?(?:\\?.*)?$");
-    private static final ExecutorService EXEC = Executors.newFixedThreadPool(2);
+    private static final ExecutorService EXEC = Executors.newFixedThreadPool(3);
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     public static final class Source {
@@ -63,6 +65,31 @@ public final class EpgClient {
         Source s = new Source();
         s.base = m.group(1); s.user = m.group(2); s.pass = m.group(3); s.id = m.group(4);
         return s;
+    }
+
+    /**
+     * Guide + replay avec sources de repli : API Xtream du serveur, puis XMLTV (serveur, URL EPG
+     * de l'activation, guides publics EPG Share). Résultat renvoyé sur le thread principal.
+     * La source peut être null (guide seul, sans replay).
+     */
+    public static void load(final Context ctx, final ChannelEntity ch, final Callback cb) {
+        final Source src = ch == null ? null : parse(ch.streamUrl);
+        EXEC.execute(() -> {
+            List<Program> list = new ArrayList<>();
+            if (src != null) {
+                try {
+                    list = window(fetch(src, "get_simple_data_table"));
+                    if (list.isEmpty()) list = window(fetch(src, "get_short_epg&limit=24"));
+                } catch (Exception ignored) { }
+            }
+            if (list.isEmpty() && ch != null) {
+                try { list = window(XmltvEpg.load(ctx.getApplicationContext(), ch, src)); }
+                catch (Exception ignored) { }
+            }
+            final List<Program> res = list;
+            if (res.isEmpty()) post(() -> cb.onError("Programme indisponible pour cette chaîne"));
+            else post(() -> cb.onResult(res, src));
+        });
     }
 
     /** Charge le guide de la chaîne (résultat renvoyé sur le thread principal). */
