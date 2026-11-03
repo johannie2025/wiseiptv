@@ -59,6 +59,9 @@ public class PlayerEngine {
                 @Override public void onTransferEnd(DataSource s, DataSpec d, boolean n) {}
             });
 
+        final DataSource.Factory baseFactory = dsFactory;
+        final DataSource.Factory teeFactory = () -> new TeeDataSource(baseFactory.createDataSource(), PlayerEngine.this);
+
         // OPTIMISATION BUFFERING (DefaultLoadControl) : Évite les micro-coupures
         DefaultLoadControl lc = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -89,7 +92,7 @@ public class PlayerEngine {
         exoPlayer = new ExoPlayer.Builder(context)
             .setLoadControl(lc)
             .setTrackSelector(ts)
-            .setMediaSourceFactory(new DefaultMediaSourceFactory(dsFactory))
+            .setMediaSourceFactory(new DefaultMediaSourceFactory(teeFactory))
             .build();
 
         exoPlayer.addListener(new Player.Listener() {
@@ -147,7 +150,66 @@ public class PlayerEngine {
     public void setMuted(boolean muted) { if (exoPlayer != null) exoPlayer.setVolume(muted ? 0f : 1f); }
     public boolean isMuted() { return exoPlayer != null && exoPlayer.getVolume() == 0f; }
 
+    // ── Enregistrement (copie du flux déjà lu par le lecteur) ─────
+
+    private final Object recLock = new Object();
+    private java.io.OutputStream recOut;
+    private java.io.File recFile;
+    private long recBytes;
+    private com.wdesign.wiseiptv.core.util.Recorder.Listener recListener;
+
+    public boolean isRecording() { synchronized (recLock) { return recOut != null; } }
+
+    /** Démarre l'enregistrement du flux en cours de lecture (direct / replay). */
+    public boolean startRecording(String name, com.wdesign.wiseiptv.core.util.Recorder.Listener l) {
+        java.io.File f;
+        synchronized (recLock) {
+            if (recOut != null) return true;
+            java.io.File dir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES);
+            if (dir == null) dir = context.getFilesDir();
+            dir = new java.io.File(dir, "WiseIPTV");
+            if (!dir.exists()) dir.mkdirs();
+            String clean = (name == null ? "enregistrement" : name).replaceAll("[^A-Za-z0-9._-]+", "_");
+            String stamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                .format(new java.util.Date());
+            f = new java.io.File(dir, clean + "_" + stamp + ".ts");
+            try { recOut = new java.io.BufferedOutputStream(new java.io.FileOutputStream(f), 256 * 1024); }
+            catch (java.io.IOException e) { recOut = null; return false; }
+            recFile = f; recBytes = 0; recListener = l;
+        }
+        if (l != null) l.onStarted(f);
+        return true;
+    }
+
+    public void stopRecording() { finishRecording(null); }
+
+    private void finishRecording(String error) {
+        java.io.File f; long n; com.wdesign.wiseiptv.core.util.Recorder.Listener l;
+        synchronized (recLock) {
+            if (recOut == null) return;
+            try { recOut.flush(); recOut.close(); } catch (Exception ignored) { }
+            recOut = null; f = recFile; n = recBytes; l = recListener; recListener = null;
+        }
+        if (n <= 0 && f != null) f.delete();
+        if (l != null) l.onFinished(f, n, error);
+    }
+
+    /** Appelé par TeeDataSource pour chaque bloc de média lu. */
+    void onMediaBytes(byte[] b, int off, int len) {
+        String err = null;
+        synchronized (recLock) {
+            if (recOut == null) return;
+            try {
+                recOut.write(b, off, len);
+                recBytes += len;
+                if (recFile != null && recFile.getUsableSpace() < 150L * 1024 * 1024) err = "Espace de stockage insuffisant";
+            } catch (java.io.IOException e) { err = e.getMessage() != null ? e.getMessage() : "Erreur d'écriture"; }
+        }
+        if (err != null) finishRecording(err);
+    }
+
     public void release() {
+        finishRecording(null);
         com.wdesign.wiseiptv.core.util.DataUsage.flush(context);
         if (exoPlayer != null) { 
             exoPlayer.stop(); 
