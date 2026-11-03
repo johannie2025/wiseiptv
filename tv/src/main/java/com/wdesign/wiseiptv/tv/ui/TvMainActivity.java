@@ -99,6 +99,7 @@ public class TvMainActivity extends FragmentActivity {
     private RecyclerView rvList;
     private ChAdapter adapter;
     private final View[] navViews = new View[NAV_LABELS.length];
+    private boolean railExpanded = true, pillShown;
 
     // État
     private int section = S_HOME;
@@ -128,6 +129,7 @@ public class TvMainActivity extends FragmentActivity {
         btnLive      = findViewById(R.id.btn_live);
         btnRec       = findViewById(R.id.btn_rec);
         btnRec.setOnClickListener(v -> toggleRecord());
+        findViewById(R.id.preview_card).setOnClickListener(v -> { if (selected != null) openPlayer(selected, previewUrl); });
         tvListTitle  = findViewById(R.id.tv_list_title);
         tvInfoName   = findViewById(R.id.tv_info_name);
         tvInfoGroup  = findViewById(R.id.tv_info_group);
@@ -146,6 +148,7 @@ public class TvMainActivity extends FragmentActivity {
         rvList.setAdapter(adapter);
 
         buildNav();
+        setupRailAndPreviewSize();
         bindSubscriptionPill();
 
         btnWatch.setOnClickListener(v -> { if (selected != null) openPlayer(selected, previewUrl); });
@@ -214,6 +217,53 @@ public class TvMainActivity extends FragmentActivity {
     }
 
     private boolean isBrowse(int s) { return s <= S_FAVS; }
+
+    /** Menu latéral réduit aux icônes quand le focus est dans la liste / l'aperçu ; aperçu 16:9 pleine largeur. */
+    private void setupRailAndPreviewSize() {
+        final View rail = findViewById(R.id.nav_rail);
+        getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
+            if (newF == null) return;
+            boolean inNav = false;
+            View v = newF;
+            while (v != null) {
+                if (v == rail) { inNav = true; break; }
+                android.view.ViewParent vp = v.getParent();
+                v = vp instanceof View ? (View) vp : null;
+            }
+            setRailExpanded(inNav);
+        });
+        final View right = findViewById(R.id.right_col);
+        final View card = findViewById(R.id.preview_card);
+        right.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            final int w = r - l, hAvail = b - t;
+            if (w <= 0 || hAvail <= 0) return;
+            final int h = Math.min(Math.round(w * 9f / 16f), Math.round(hAvail * 0.62f));
+            if (Math.abs(card.getLayoutParams().height - h) > 2) card.post(() -> {
+                ViewGroup.LayoutParams lp = card.getLayoutParams();
+                lp.height = h;
+                card.setLayoutParams(lp);
+            });
+        });
+    }
+
+    private void setRailExpanded(boolean expand) {
+        if (expand == railExpanded) return;
+        railExpanded = expand;
+        final View rail = findViewById(R.id.nav_rail);
+        final int to = dp(expand ? 240 : 80);
+        int from = rail.getWidth() > 0 ? rail.getWidth() : dp(expand ? 80 : 240);
+        for (View nv : navViews) nv.findViewById(R.id.nav_label).setVisibility(expand ? View.VISIBLE : View.GONE);
+        findViewById(R.id.rail_title).setVisibility(expand ? View.VISIBLE : View.GONE);
+        tvSubPill.setVisibility(expand && pillShown ? View.VISIBLE : View.GONE);
+        android.animation.ValueAnimator va = android.animation.ValueAnimator.ofInt(from, to);
+        va.setDuration(160);
+        va.addUpdateListener(a -> {
+            ViewGroup.LayoutParams lp = rail.getLayoutParams();
+            lp.width = (int) a.getAnimatedValue();
+            rail.setLayoutParams(lp);
+        });
+        va.start();
+    }
 
     private void highlightNav(int s) {
         for (int i = 0; i < navViews.length; i++) navViews[i].setSelected(i == s);
@@ -300,6 +350,7 @@ public class TvMainActivity extends FragmentActivity {
             replaying = false;
             previewUrl = ch.streamUrl;
             btnLive.setVisibility(View.GONE);
+            if (previewEngine != null && previewEngine.isRecording()) previewEngine.stopRecording();
             handler.removeCallbacks(previewTask);
             handler.postDelayed(previewTask, fromFocus ? 700 : 250);
         }
@@ -334,7 +385,7 @@ public class TvMainActivity extends FragmentActivity {
                 }
             });
             previewEngine.attachView(previewView);
-            previewEngine.setMuted(true);
+            previewEngine.setMuted(false);
         }
         previewEngine.play(url);
     }
@@ -416,31 +467,40 @@ public class TvMainActivity extends FragmentActivity {
         tvInfoGroup.setText(selected.groupTitle == null ? "" : selected.groupTitle);
         tvPreviewLive.setVisibility(selected.contentType == ChannelEntity.TYPE_LIVE
             && AppSettings.liveBadges(this) ? View.VISIBLE : View.GONE);
-        if (previewEngine != null) previewEngine.setMuted(true);
+        if (previewEngine != null) previewEngine.setMuted(false);
         playPreview(previewUrl);
     }
 
     private void toggleRecord() {
-        if (recorder.isRecording()) { recorder.stop(); return; }
-        final String url = previewUrl != null ? previewUrl : (selected != null ? selected.streamUrl : null);
-        if (url == null || url.isEmpty() || selected == null) return;
-        recorder.start(this, url, selected.name, new Recorder.Listener() {
+        if (selected == null) return;
+        if ((previewEngine != null && previewEngine.isRecording()) || recorder.isRecording()) {
+            if (previewEngine != null) previewEngine.stopRecording();
+            recorder.stop();
+            return;
+        }
+        final String url = previewUrl != null ? previewUrl : selected.streamUrl;
+        if (url == null || url.isEmpty()) return;
+        Recorder.Listener l = new Recorder.Listener() {
             @Override public void onStarted(java.io.File file) {
-                runOnUiThread(() -> {
-                    btnRec.setText("⏹  Arrêter");
-                    toast("⏺ Enregistrement démarré");
-                });
+                runOnUiThread(() -> { btnRec.setText("⏹ Arrêter"); toast("⏺ Enregistrement démarré"); });
             }
             @Override public void onFinished(java.io.File file, long bytes, String error) {
                 runOnUiThread(() -> {
-                    btnRec.setText("⏺  Enregistrer");
+                    btnRec.setText("⏺ Enregistrer");
                     if (isDestroyed()) return;
                     Toast.makeText(TvMainActivity.this, error != null ? "Enregistrement interrompu : " + error
-                        : bytes > 0 ? "✅ Enregistré : " + file.getName() + "\nDossier : Films/WiseIPTV de l'application"
-                        : "Rien n'a été enregistré.", Toast.LENGTH_LONG).show();
+                        : bytes > 0 ? "✅ Enregistré : " + file.getAbsolutePath()
+                        : "Rien n'a été enregistré : attendez que la vidéo démarre puis réessayez.",
+                        Toast.LENGTH_LONG).show();
                 });
             }
-        });
+        };
+        if (selected.contentType == ChannelEntity.TYPE_LIVE || replaying) {
+            if (previewEngine == null || !previewEngine.startRecording(selected.name, l))
+                toast("Impossible de démarrer l'enregistrement.");
+        } else {
+            recorder.start(this, url, selected.name, l);
+        }
     }
 
     private void toggleFavorite() {
@@ -667,8 +727,9 @@ public class TvMainActivity extends FragmentActivity {
 
     private void bindSubscriptionPill() {
         SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_TV);
-        if (si == null) { tvSubPill.setVisibility(View.GONE); return; }
-        tvSubPill.setVisibility(View.VISIBLE);
+        if (si == null) { pillShown = false; tvSubPill.setVisibility(View.GONE); return; }
+        pillShown = true;
+        tvSubPill.setVisibility(railExpanded ? View.VISIBLE : View.GONE);
         tvSubPill.setText(si.active ? "Premium · " + si.daysLeft + " j" : "Expiré");
         if (!si.active || si.isExpiringSoon(5)) tvSubPill.setBackgroundResource(R.drawable.bg_alert);
     }

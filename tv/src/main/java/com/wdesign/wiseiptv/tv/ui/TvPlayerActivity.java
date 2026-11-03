@@ -183,8 +183,9 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
     }
 
     private void toggleRecord() {
-        if (recorder.isRecording()) { recorder.stop(); return; }
-        recorder.start(this, streamUrl, channelName, new Recorder.Listener() {
+        if (engine == null) return;
+        if (engine.isRecording() || recorder.isRecording()) { engine.stopRecording(); recorder.stop(); return; }
+        Recorder.Listener l = new Recorder.Listener() {
             @Override public void onStarted(java.io.File f) {
                 runOnUiThread(() -> { tvStatus.setText("⏺ REC"); tvStatus.setVisibility(View.VISIBLE); });
             }
@@ -193,11 +194,14 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
                     tvStatus.setVisibility(View.GONE);
                     if (isDestroyed()) return;
                     Toast.makeText(TvPlayerActivity.this, error != null ? "Enregistrement interrompu : " + error
-                        : bytes > 0 ? "✅ Enregistré : " + f.getName() : "Rien n'a été enregistré.",
+                        : bytes > 0 ? "✅ Enregistré : " + f.getAbsolutePath()
+                        : "Rien n'a été enregistré : attendez que la vidéo démarre puis réessayez.",
                         Toast.LENGTH_LONG).show();
                 });
             }
-        });
+        };
+        if (contentType == ChannelEntity.TYPE_LIVE || streamUrl.contains("/timeshift/")) engine.startRecording(channelName, l);
+        else recorder.start(this, streamUrl, channelName, l);
     }
 
     private void showOsd() {
