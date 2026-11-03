@@ -19,6 +19,13 @@ import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.epg.EpgClient;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.player.PlayerHandoff;
+import com.wdesign.wiseiptv.core.util.StatsReporter;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.wdesign.wiseiptv.core.util.AdaptiveBg;
 import com.wdesign.wiseiptv.core.util.AppSettings;
 import com.wdesign.wiseiptv.core.util.Recorder;
@@ -175,19 +182,38 @@ public class PlayerActivity extends AppCompatActivity
         // Hauteur 16:9 de la zone vidéo
         videoContainer.post(this::applyLayoutForMode);
 
-        engine = new PlayerEngine(this, this);
-        engine.attachView(playerView);
+        // Si l'accueil nous passe son lecteur d'aperçu déjà en lecture : on le reprend tel quel
+        // (même connexion, même image, aucun rechargement). Sinon on démarre normalement.
+        PlayerEngine handed = PlayerHandoff.take(streamUrl);
         playingUrl = streamUrl;
-        engine.play(streamUrl);
-        tvQuality.setText(PlayerEngine.QUALITY_LABELS[engine.getQuality()]);
-        long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
-        if (startPosition > 0) engine.seekTo(startPosition);
+        if (handed != null) {
+            engine = handed;
+            engine.setListener(this);
+            engine.setMuted(false);
+            PlayerView previewView = PlayerHandoff.takeView();
+            if (previewView != null && engine.getPlayer() != null)
+                PlayerView.switchTargetView(engine.getPlayer(), previewView, playerView);
+            else engine.attachView(playerView);
+            if (engine.isReady()) { progressBar.setVisibility(View.GONE); }
+            else if (engine.isBuffering()) { progressBar.setVisibility(View.VISIBLE); }
+            engine.setWatchLabel(channelName);
+            tvQuality.setText(PlayerEngine.QUALITY_LABELS[engine.getQuality()]);
+        } else {
+            engine = new PlayerEngine(this, this);
+            engine.attachView(playerView);
+            engine.setWatchLabel(channelName);
+            engine.play(streamUrl);
+            tvQuality.setText(PlayerEngine.QUALITY_LABELS[engine.getQuality()]);
+            long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
+            if (startPosition > 0) engine.seekTo(startPosition);
+        }
 
         bindChannelViews();
         loadFavState();
         loadSimilar();
         loadEpg();
         setupGestures();
+        setupCutoutInsets();
         showOsd();
 
         boolean startFull = getIntent().getBooleanExtra(EXTRA_FULLSCREEN, false)
@@ -215,6 +241,44 @@ public class PlayerActivity extends AppCompatActivity
         persistState();
     }
 
+    /**
+     * Plein écran réel : le contenu passe sous les barres système (decorFitsSystemWindows=false)
+     * puis barres d'état + navigation cachées ; un balayage depuis le bord les fait réapparaître un instant.
+     */
+    private void applySystemBars(boolean hide) {
+        Window w = getWindow();
+        WindowCompat.setDecorFitsSystemWindows(w, !hide);
+        WindowInsetsControllerCompat c = WindowCompat.getInsetsController(w, w.getDecorView());
+        if (c == null) return;
+        if (hide) {
+            c.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            c.hide(WindowInsetsCompat.Type.systemBars());
+        } else {
+            c.show(WindowInsetsCompat.Type.systemBars());
+        }
+    }
+
+    /** Garde les commandes hors de l'encoche / des coins arrondis quand la vidéo passe en plein écran. */
+    private void setupCutoutInsets() {
+        final View root = findViewById(R.id.player_root);
+        final int pad = Math.round(10 * getResources().getDisplayMetrics().density);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets i = insets.getInsets(WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.systemBars());
+            if (fullscreen) {
+                osdTop.setPadding(Math.max(pad, i.left), 0, Math.max(pad, i.right), 0);
+                osdBottom.setPadding(Math.max(pad / 2, i.left), 0, Math.max(pad / 2, i.right), 0);
+            }
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(root);
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // Après une boîte de dialogue / le volume système, les barres peuvent revenir : on les recache.
+        if (hasFocus && fullscreen) applySystemBars(true);
+    }
+
     private void releaseOrientation() {
         if (isFinishing() || isDestroyed() || fullscreen) return;
         orientationLocked = false;
@@ -238,9 +302,7 @@ public class PlayerActivity extends AppCompatActivity
             osdTop.setVisibility(View.VISIBLE);
             zapControls.setVisibility(View.VISIBLE);
             btnFullscreen.setImageResource(R.drawable.ic_fullscreen_exit);
-            getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            applySystemBars(true);
         } else {
             int w = getResources().getDisplayMetrics().widthPixels;
             lp.height = Math.round(Math.min(w, getResources().getDisplayMetrics().heightPixels) * 9f / 16f);
@@ -249,7 +311,7 @@ public class PlayerActivity extends AppCompatActivity
             osdTop.setVisibility(View.GONE);
             zapControls.setVisibility(View.GONE);
             btnFullscreen.setImageResource(R.drawable.ic_fullscreen);
-            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+            applySystemBars(false);
         }
         videoContainer.setLayoutParams(lp);
         applyResizeMode();
@@ -377,6 +439,7 @@ public class PlayerActivity extends AppCompatActivity
         tvChannelName.setAlpha(0f);
         tvChannelName.animate().alpha(1).setDuration(160).start();
         playingUrl = streamUrl;
+        engine.setWatchLabel(channelName);
         engine.play(streamUrl);
         showOsd();
         loadFavState();
@@ -637,6 +700,7 @@ public class PlayerActivity extends AppCompatActivity
         persistState();
         super.onStop();
         if (engine != null) engine.pause();
+        StatsReporter.report(this, true);        // temps de visionnage + données → panel
     }
 
     @Override protected void onDestroy() {

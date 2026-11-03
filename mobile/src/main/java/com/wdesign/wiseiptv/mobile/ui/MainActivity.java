@@ -24,6 +24,8 @@ import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.player.PlayerHandoff;
+import com.wdesign.wiseiptv.core.util.StatsReporter;
 import com.wdesign.wiseiptv.core.util.Fx;
 import com.wdesign.wiseiptv.core.util.SubscriptionInfo;
 import com.wdesign.wiseiptv.mobile.R;
@@ -796,13 +798,24 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
 
     @Override
     public void onClick(ChannelEntity ch) {
-        if (heroEngine != null) heroEngine.pause();
+        heroHandler.removeCallbacks(heroRotate);
+        // L'aperçu joue déjà cette chaîne : on passe CE lecteur au plein écran, sans recharger le flux.
+        if (heroEngine != null && heroPlayingId == ch.id && ch.streamUrl != null
+                && ch.streamUrl.equals(heroEngine.getCurrentUrl())) {
+            PlayerHandoff.offer(heroEngine, ch.streamUrl, heroPreview);
+            heroEngine = null;
+            heroPlayingId = -1;
+        } else if (heroEngine != null) {
+            heroEngine.pause();
+        }
         saveRecent(ch);
         startActivity(playerIntent(ch));
     }
 
     @Override protected void onResume() {
         super.onResume();
+        PlayerHandoff.discard();                 // un lecteur déposé mais jamais repris est libéré
+        StatsReporter.report(this, false);       // stats + modèle de l'appareil → panel (limité à 1 envoi / 10 min)
         ResumeStore.setScreen(this, ResumeStore.SCREEN_MAIN);
         applyLayoutMode();
         int navId = showingHome ? R.id.nav_home
