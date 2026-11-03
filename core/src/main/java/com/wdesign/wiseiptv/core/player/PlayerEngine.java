@@ -31,8 +31,12 @@ public class PlayerEngine {
     
     private ExoPlayer exoPlayer;
     private final Context context;
-    private final Listener listener;
+    private volatile Listener listener;
     private int currentQuality = 0;
+    private String currentUrl;
+    /** Nom de la chaîne vue (null pour un simple aperçu : le temps d'aperçu n'est pas compté comme visionnage). */
+    private volatile String watchLabel;
+    private long watchSince = 0L;
 
     public PlayerEngine(Context ctx, Listener l) {
         this.context = ctx.getApplicationContext(); 
@@ -105,6 +109,11 @@ public class PlayerEngine {
                 }
             }
 
+            @Override public void onIsPlayingChanged(boolean playing) {
+                if (playing) { watchSince = android.os.SystemClock.elapsedRealtime(); }
+                else flushWatchTime();
+            }
+
             @Override public void onPlayerError(PlaybackException e) {
                 Log.e(TAG, "ExoPlayer Error: " + e.getMessage());
                 listener.onError(e.getMessage() != null ? e.getMessage() : "Erreur de lecture du flux");
@@ -116,8 +125,42 @@ public class PlayerEngine {
         v.setPlayer(exoPlayer); 
     }
 
+    // ── Passage de relais aperçu -> lecteur plein écran (sans recharger le flux) ──
+
+    /** Remplace l'écouteur (utilisé quand un autre écran reprend ce lecteur en cours de lecture). */
+    public void setListener(Listener l) { if (l != null) this.listener = l; }
+
+    /** Le lecteur ExoPlayer sous-jacent (pour PlayerView.switchTargetView). */
+    public Player getPlayer() { return exoPlayer; }
+
+    /** URL actuellement chargée dans le lecteur. */
+    public String getCurrentUrl() { return currentUrl; }
+
+    /** Vrai si l'image tourne déjà (état READY ou lecture en cours). */
+    public boolean isReady() { return exoPlayer != null && exoPlayer.getPlaybackState() == Player.STATE_READY; }
+
+    public boolean isBuffering() { return exoPlayer != null && exoPlayer.getPlaybackState() == Player.STATE_BUFFERING; }
+
+    /** Donne un nom à la chaîne regardée : le temps de lecture est alors compté dans les statistiques. */
+    public void setWatchLabel(String name) {
+        flushWatchTime();
+        watchLabel = name;
+        if (exoPlayer != null && exoPlayer.isPlaying()) watchSince = android.os.SystemClock.elapsedRealtime();
+    }
+
+    private void flushWatchTime() {
+        long since = watchSince;
+        watchSince = 0L;
+        String label = watchLabel;
+        if (since <= 0L || label == null) return;
+        long sec = (android.os.SystemClock.elapsedRealtime() - since) / 1000L;
+        if (sec > 0) com.wdesign.wiseiptv.core.util.WatchStats.add(context, label, sec);
+    }
+
     public void play(String url) {
         if (url == null || url.isEmpty()) return;
+        flushWatchTime();
+        currentUrl = url;
         exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(url)));
         exoPlayer.setPlayWhenReady(true); 
         exoPlayer.prepare(); 
@@ -209,6 +252,7 @@ public class PlayerEngine {
     }
 
     public void release() {
+        flushWatchTime();
         finishRecording(null);
         com.wdesign.wiseiptv.core.util.DataUsage.flush(context);
         if (exoPlayer != null) { 
