@@ -11,6 +11,7 @@ import android.widget.*;
 import androidx.annotation.OptIn;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.media3.common.util.UnstableApi;
+import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -68,6 +69,7 @@ public class PlayerActivity extends AppCompatActivity
     private TextView actRecLabel;
     private ImageView actRecIcon;
     private boolean orientationLocked;
+    private int resizeIndex = 1;   // 0 = ajusté, 1 = remplir (zoom), 2 = étirer
     private AudioManager audioManager;
     private GestureDetector gestureDetector;
     private final ExecutorService zapExecutor = Executors.newSingleThreadExecutor();
@@ -83,6 +85,11 @@ public class PlayerActivity extends AppCompatActivity
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams wl = getWindow().getAttributes();
+            wl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(wl);
+        }
         setContentView(R.layout.activity_player);
         db = AppDatabase.get(this);
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -150,6 +157,13 @@ public class PlayerActivity extends AppCompatActivity
             finish();
         });
         btnFullscreen.setOnClickListener(v -> toggleFullscreen());
+        btnFullscreen.setOnLongClickListener(v -> {
+            resizeIndex = (resizeIndex + 1) % 3;
+            applyResizeMode();
+            Toast.makeText(this, resizeIndex == 0 ? "Image ajustée" : resizeIndex == 1
+                ? "Image remplie" : "Image étirée", Toast.LENGTH_SHORT).show();
+            return true;
+        });
         btnPlayPause.setOnClickListener(v -> togglePause());
         btnMute.setOnClickListener(v -> {
             if (engine == null) return;
@@ -207,6 +221,14 @@ public class PlayerActivity extends AppCompatActivity
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
 
+    private void applyResizeMode() {
+        if (playerView == null) return;
+        if (!fullscreen) { playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT); return; }
+        playerView.setResizeMode(resizeIndex == 0 ? AspectRatioFrameLayout.RESIZE_MODE_FIT
+            : resizeIndex == 1 ? AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            : AspectRatioFrameLayout.RESIZE_MODE_FILL);
+    }
+
     private void applyLayoutForMode() {
         ViewGroup.LayoutParams lp = videoContainer.getLayoutParams();
         if (fullscreen) {
@@ -230,6 +252,10 @@ public class PlayerActivity extends AppCompatActivity
             getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
         }
         videoContainer.setLayoutParams(lp);
+        applyResizeMode();
+        View root = findViewById(R.id.player_root);
+        if (fullscreen) root.setBackgroundColor(0xFF000000);
+        else AdaptiveBg.apply(root, current != null ? current.logoUrl : null);
         showOsd();
     }
 
@@ -476,7 +502,7 @@ public class PlayerActivity extends AppCompatActivity
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || id != channelId) return;
                 current = cur;
-                AdaptiveBg.apply(findViewById(R.id.player_root), cur != null ? cur.logoUrl : null);
+                if (!fullscreen) AdaptiveBg.apply(findViewById(R.id.player_root), cur != null ? cur.logoUrl : null);
                 similarAdapter.setData(out);
                 int vis = out.isEmpty() ? View.GONE : View.VISIBLE;
                 similarHeader.setVisibility(vis);
@@ -488,9 +514,13 @@ public class PlayerActivity extends AppCompatActivity
     // ── Enregistrement ────────────────────────────────────────────
 
     private void toggleRecord() {
-        if (recorder.isRecording()) { recorder.stop(); return; }
-        if (playingUrl == null || playingUrl.isEmpty()) return;
-        recorder.start(this, playingUrl, channelName, new Recorder.Listener() {
+        if (engine == null) return;
+        if (engine.isRecording() || recorder.isRecording()) {
+            engine.stopRecording();
+            recorder.stop();
+            return;
+        }
+        Recorder.Listener l = new Recorder.Listener() {
             @Override public void onStarted(java.io.File file) {
                 runOnUiThread(() -> {
                     setRecordingUi(true);
@@ -503,12 +533,20 @@ public class PlayerActivity extends AppCompatActivity
                     if (isDestroyed()) return;
                     String msg = error != null ? "Enregistrement interrompu : " + error
                         : bytes > 0 ? "✅ Enregistré (" + com.wdesign.wiseiptv.core.util.DataUsage.format(bytes)
-                            + ") : " + file.getName() + "\nDossier : Films/WiseIPTV de l'application"
-                        : "Rien n'a été enregistré.";
+                            + ")\n" + file.getAbsolutePath()
+                        : "Rien n'a été enregistré : lancez la lecture puis réessayez.";
                     Toast.makeText(PlayerActivity.this, msg, Toast.LENGTH_LONG).show();
                 });
             }
-        });
+        };
+        // Direct / replay : copie du flux déjà lu par le lecteur (une seule connexion au serveur).
+        boolean fromPlayer = contentType == ChannelEntity.TYPE_LIVE || replaying;
+        if (fromPlayer) {
+            if (!engine.startRecording(channelName, l))
+                Toast.makeText(this, "Impossible de créer le fichier d'enregistrement.", Toast.LENGTH_LONG).show();
+        } else if (playingUrl != null && !playingUrl.isEmpty()) {
+            recorder.start(this, playingUrl, channelName, l);
+        }
     }
 
     private void setRecordingUi(boolean on) {

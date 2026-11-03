@@ -113,50 +113,54 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-                <LinearLayout android:id="@+id/home_hero"
-                    android:layout_width="match_parent" android:layout_height="156dp"
+                <FrameLayout android:id="@+id/home_hero"
+                    android:layout_width="match_parent" android:layout_height="200dp"
                     android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
-                    android:orientation="horizontal" android:gravity="center_vertical"
-                    android:background="@drawable/bg_hero" android:padding="16dp">
-                    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
-                        android:layout_weight="1" android:orientation="vertical">
-                        <TextView android:id="@+id/hero_badge"
-                            android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="EN DIRECT" android:textColor="@color/white"
-                            android:textSize="9sp" android:textStyle="bold"
-                            android:background="@drawable/bg_badge_live"
-                            android:paddingStart="7dp" android:paddingEnd="7dp"
-                            android:paddingTop="2dp" android:paddingBottom="2dp"/>
-                        <TextView android:id="@+id/hero_title"
-                            android:layout_width="match_parent" android:layout_height="wrap_content"
-                            android:layout_marginTop="6dp" android:textColor="@color/white"
-                            android:textSize="20sp" android:textStyle="bold"
-                            android:maxLines="2" android:ellipsize="end"/>
-                        <TextView android:id="@+id/hero_sub"
-                            android:layout_width="match_parent" android:layout_height="wrap_content"
-                            android:textColor="#C9D8F2" android:textSize="12sp"
-                            android:maxLines="1" android:ellipsize="end"/>
+                    android:background="@drawable/bg_hero" android:clipToOutline="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:clickable="true" android:focusable="true">
+                    <ImageView android:id="@+id/hero_logo"
+                        android:layout_width="match_parent" android:layout_height="match_parent"
+                        android:padding="48dp" android:scaleType="fitCenter"
+                        android:contentDescription="@null"/>
+                    <androidx.media3.ui.PlayerView android:id="@+id/hero_preview"
+                        android:layout_width="match_parent" android:layout_height="match_parent"
+                        app:use_controller="false" app:resize_mode="zoom"
+                        android:visibility="invisible"/>
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_gravity="bottom" android:orientation="horizontal"
+                        android:gravity="bottom" android:background="@drawable/bg_osd_bar_bottom"
+                        android:paddingStart="14dp" android:paddingEnd="14dp"
+                        android:paddingTop="26dp" android:paddingBottom="12dp">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView android:id="@+id/hero_badge"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="EN DIRECT" android:textColor="@color/white"
+                                android:textSize="9sp" android:textStyle="bold"
+                                android:background="@drawable/bg_badge_live"
+                                android:paddingStart="7dp" android:paddingEnd="7dp"
+                                android:paddingTop="2dp" android:paddingBottom="2dp"/>
+                            <TextView android:id="@+id/hero_title"
+                                android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp" android:textColor="@color/white"
+                                android:textSize="18sp" android:textStyle="bold"
+                                android:maxLines="1" android:ellipsize="end"/>
+                            <TextView android:id="@+id/hero_sub"
+                                android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:textColor="#C9D8F2" android:textSize="12sp"
+                                android:maxLines="1" android:ellipsize="end"/>
+                        </LinearLayout>
                         <androidx.appcompat.widget.AppCompatButton android:id="@+id/btn_watch"
                             style="@style/Wise.Button"
                             android:layout_width="wrap_content" android:layout_height="38dp"
-                            android:layout_marginTop="10dp"
+                            android:layout_marginStart="10dp"
                             android:paddingStart="18dp" android:paddingEnd="18dp"
+                            android:gravity="center"
                             android:text="▶  Regarder" android:textSize="13sp"
                             android:background="@drawable/btn_watch"/>
                     </LinearLayout>
-                    <FrameLayout android:layout_width="150dp" android:layout_height="100dp"
-                        android:layout_marginStart="10dp" android:background="@drawable/bg_card"
-                        android:clipToOutline="true">
-                        <ImageView android:id="@+id/hero_logo"
-                            android:layout_width="match_parent" android:layout_height="match_parent"
-                            android:padding="12dp" android:scaleType="fitCenter"
-                            android:contentDescription="@null"/>
-                        <androidx.media3.ui.PlayerView android:id="@+id/hero_preview"
-                            android:layout_width="match_parent" android:layout_height="match_parent"
-                            app:use_controller="false" app:resize_mode="zoom"
-                            android:visibility="invisible"/>
-                    </FrameLayout>
-                </LinearLayout>
+                </FrameLayout>
 
                 <LinearLayout android:id="@+id/hero_dots"
                     android:layout_width="match_parent" android:layout_height="22dp"

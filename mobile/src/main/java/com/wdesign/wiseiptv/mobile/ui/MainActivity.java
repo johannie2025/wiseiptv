@@ -156,6 +156,14 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
             if (!homeChannels.isEmpty()) onClick(homeChannels.get(Math.min(heroIndex, homeChannels.size() - 1)));
         });
         Fx.pressable(findViewById(R.id.btn_watch));
+        final View heroCard = findViewById(R.id.home_hero);
+        heroCard.setOnClickListener(v -> findViewById(R.id.btn_watch).performClick());
+        // Aperçu au maximum : zone vidéo 16:9 sur toute la largeur
+        heroCard.post(() -> {
+            android.view.ViewGroup.LayoutParams lp = heroCard.getLayoutParams();
+            lp.height = Math.round(heroCard.getWidth() * 9f / 16f);
+            heroCard.setLayoutParams(lp);
+        });
         findViewById(R.id.btn_see_all).setOnClickListener(v -> openTab(1));
 
         setupGridChooser();
@@ -539,7 +547,6 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
                 heroDots.setVisibility(picks.isEmpty() ? View.GONE : View.VISIBLE);
                 bindHero();
                 heroHandler.removeCallbacks(heroRotate);
-                if (picks.size() > 1) heroHandler.postDelayed(heroRotate, 12000);
             });
         });
     }
@@ -628,15 +635,16 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
         if (heroEngine == null) {
             heroEngine = new PlayerEngine(this, new PlayerEngine.Listener() {
                 @Override public void onBuffering(boolean b) {}
-                @Override public void onPlaying() { runOnUiThread(() -> heroPreview.setVisibility(View.VISIBLE)); }
+                @Override public void onPlaying() { runOnUiThread(() -> { heroPreview.setVisibility(View.VISIBLE); heroLogo.setVisibility(View.INVISIBLE); }); }
                 @Override public void onError(String message) { runOnUiThread(() -> heroPreview.setVisibility(View.INVISIBLE)); }
             });
             heroEngine.attachView(heroPreview);
-            heroEngine.setMuted(true);
+            heroEngine.setMuted(false);
         }
         if (heroPlayingId != c.id) {
             heroPlayingId = c.id;
             heroPreview.setVisibility(View.INVISIBLE);
+            heroLogo.setVisibility(View.VISIBLE);
             heroEngine.play(c.streamUrl);
         } else if (!heroEngine.isPlaying()) {
             heroEngine.resume();
