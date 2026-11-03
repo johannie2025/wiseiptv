@@ -124,6 +124,38 @@ public class ActivationManager {
         p.edit().remove("playlist_ids").apply();
     }
 
+    /** Enregistre le résultat de la dernière vérification du panel (identifiants + DNS à jour). */
+    public static void cacheActive(Context ctx, DeviceSecurity.ActivationResult r) {
+        StringBuilder urls = new StringBuilder(), epgs = new StringBuilder();
+        for (int i = 0; i < r.dnsServers.size(); i++) {
+            if (i > 0) { urls.append(","); epgs.append(","); }
+            urls.append(r.dnsServers.get(i).url);
+            String epg = r.dnsServers.get(i).epgUrl;
+            epgs.append(epg != null ? epg : "");
+        }
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("status", "ACTIVE").putString("expires_at", r.expiresAt)
+            .putString("login", r.login).putString("password", r.password)
+            .putString("dns_urls", urls.toString()).putString("dns_epg_urls", epgs.toString()).apply();
+    }
+
+    /** Liste des DNS du panel, sous la même forme que celle du cache (pour détecter un changement). */
+    public static String dnsKey(DeviceSecurity.ActivationResult r) {
+        StringBuilder urls = new StringBuilder();
+        for (int i = 0; i < r.dnsServers.size(); i++) {
+            if (i > 0) urls.append(",");
+            urls.append(r.dnsServers.get(i).url);
+        }
+        return urls.toString();
+    }
+
+    /** Abonnement refusé par le panel : on oublie les identifiants en cache (l'écran d'activation prend le relais). */
+    public static void clearCache(Context ctx, String status) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("status", status)
+            .remove("expires_at").remove("login").remove("password")
+            .remove("dns_urls").remove("dns_epg_urls").apply();
+    }
+
     private static void savePrefs(Context ctx, String s, String exp, String login) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString("status", s).putString("expires_at", exp)

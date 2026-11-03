@@ -39,6 +39,9 @@ import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.db.entity.PlaylistEntity;
 import com.wdesign.wiseiptv.core.epg.EpgClient;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.player.PlayerHandoff;
+import com.wdesign.wiseiptv.core.util.StatsReporter;
+import com.wdesign.wiseiptv.tv.util.ActivationManager;
 import com.wdesign.wiseiptv.core.util.AdaptiveBg;
 import com.wdesign.wiseiptv.core.util.AppSettings;
 import com.wdesign.wiseiptv.core.util.Recorder;
@@ -52,6 +55,11 @@ import com.wdesign.wiseiptv.core.security.DeviceSecurity;
 import com.wdesign.wiseiptv.tv.R;
 import com.wdesign.wiseiptv.tv.util.PlaylistLoader;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -97,9 +105,15 @@ public class TvMainActivity extends FragmentActivity {
     private ProgressBar progressBar, previewLoading;
     private PlayerView previewView;
     private RecyclerView rvList;
-    private ChAdapter adapter;
+    private RowsAdapter adapter;
     private final View[] navViews = new View[NAV_LABELS.length];
-    private boolean railExpanded = true, pillShown;
+    private boolean pillShown, initialFocusDone;
+    // Synchronisation : DNS gardés pendant un cycle + dernière erreur + nombre de tentatives auto
+    private final Set<Long> syncKeepIds = Collections.synchronizedSet(new HashSet<Long>());
+    private volatile String lastSyncError;
+    private final java.util.concurrent.atomic.AtomicBoolean syncRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private volatile boolean syncAgain;
+    private int syncRetries = 0;
 
     // État
     private int section = S_HOME;
@@ -143,12 +157,11 @@ public class TvMainActivity extends FragmentActivity {
         previewView  = findViewById(R.id.tv_preview_player);
         rvList       = findViewById(R.id.rv_list);
 
-        adapter = new ChAdapter();
+        adapter = new RowsAdapter();
         rvList.setLayoutManager(new LinearLayoutManager(this));
         rvList.setAdapter(adapter);
 
         buildNav();
-        setupRailAndPreviewSize();
         bindSubscriptionPill();
 
         btnWatch.setOnClickListener(v -> { if (selected != null) openPlayer(selected, previewUrl); });
@@ -163,7 +176,14 @@ public class TvMainActivity extends FragmentActivity {
         section = getSharedPreferences(PREFS_STATE, MODE_PRIVATE).getInt("section", S_HOME);
         if (section == S_SEARCH) section = S_HOME;
         showSection(section);
-        maybeSync(false);
+        if (getIntent().getStringExtra(EXTRA_ACT_LOGIN) == null) {
+            // Ouverture « à froid » depuis le cache : on re-vérifie le panel en arrière-plan pour récupérer
+            // une nouvelle playlist / de nouveaux DNS sans avoir à vider les données de l'app.
+            maybeSync(false);
+            refreshFromPanel(false);
+        } else {
+            maybeSync(false);
+        }
     }
 
     private void bg(Runnable r) {
@@ -179,6 +199,11 @@ public class TvMainActivity extends FragmentActivity {
             View v = inf.inflate(R.layout.item_tv_nav, navItems, false);
             ((ImageView) v.findViewById(R.id.nav_icon)).setImageResource(NAV_ICONS[i]);
             ((TextView) v.findViewById(R.id.nav_label)).setText(NAV_LABELS[i]);
+            if (i >= S_SEARCH) {   // Recherche / Compte / Paramètres / À propos : icônes seules (place en haut)
+                v.findViewById(R.id.nav_label).setVisibility(View.GONE);
+                v.setContentDescription(NAV_LABELS[i]);
+                v.setPadding(dp(12), v.getPaddingTop(), dp(12), v.getPaddingBottom());
+            }
             v.setOnClickListener(x -> showSection(idx));
             v.setOnFocusChangeListener((x, f) -> { if (f && idx != S_SEARCH) showSection(idx); });
             navItems.addView(v);
@@ -217,53 +242,6 @@ public class TvMainActivity extends FragmentActivity {
     }
 
     private boolean isBrowse(int s) { return s <= S_FAVS; }
-
-    /** Menu latéral réduit aux icônes quand le focus est dans la liste / l'aperçu ; aperçu 16:9 pleine largeur. */
-    private void setupRailAndPreviewSize() {
-        final View rail = findViewById(R.id.nav_rail);
-        getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
-            if (newF == null) return;
-            boolean inNav = false;
-            View v = newF;
-            while (v != null) {
-                if (v == rail) { inNav = true; break; }
-                android.view.ViewParent vp = v.getParent();
-                v = vp instanceof View ? (View) vp : null;
-            }
-            setRailExpanded(inNav);
-        });
-        final View right = findViewById(R.id.right_col);
-        final View card = findViewById(R.id.preview_card);
-        right.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
-            final int w = r - l, hAvail = b - t;
-            if (w <= 0 || hAvail <= 0) return;
-            final int h = Math.min(Math.round(w * 9f / 16f), Math.round(hAvail * 0.62f));
-            if (Math.abs(card.getLayoutParams().height - h) > 2) card.post(() -> {
-                ViewGroup.LayoutParams lp = card.getLayoutParams();
-                lp.height = h;
-                card.setLayoutParams(lp);
-            });
-        });
-    }
-
-    private void setRailExpanded(boolean expand) {
-        if (expand == railExpanded) return;
-        railExpanded = expand;
-        final View rail = findViewById(R.id.nav_rail);
-        final int to = dp(expand ? 240 : 80);
-        int from = rail.getWidth() > 0 ? rail.getWidth() : dp(expand ? 80 : 240);
-        for (View nv : navViews) nv.findViewById(R.id.nav_label).setVisibility(expand ? View.VISIBLE : View.GONE);
-        findViewById(R.id.rail_title).setVisibility(expand ? View.VISIBLE : View.GONE);
-        tvSubPill.setVisibility(expand && pillShown ? View.VISIBLE : View.GONE);
-        android.animation.ValueAnimator va = android.animation.ValueAnimator.ofInt(from, to);
-        va.setDuration(160);
-        va.addUpdateListener(a -> {
-            ViewGroup.LayoutParams lp = rail.getLayoutParams();
-            lp.width = (int) a.getAnimatedValue();
-            rail.setLayoutParams(lp);
-        });
-        va.start();
-    }
 
     private void highlightNav(int s) {
         for (int i = 0; i < navViews.length; i++) navViews[i].setSelected(i == s);
@@ -331,6 +309,10 @@ public class TvMainActivity extends FragmentActivity {
             for (ChannelEntity c : list) if (c.id == want) { pick = c; break; }
         }
         select(pick, false);
+        if (!initialFocusDone && isBrowse(section)) {
+            initialFocusDone = true;
+            btnWatch.requestFocus();
+        }
     }
 
     // ── Sélection, aperçu, guide ──────────────────────────────────
@@ -523,11 +505,20 @@ public class TvMainActivity extends FragmentActivity {
         long startPosition = 0;
         if (ch.contentType != ChannelEntity.TYPE_LIVE && previewEngine != null && !replaying
             && selected != null && selected.id == ch.id) startPosition = previewEngine.getPosition();
-        if (previewEngine != null) previewEngine.pause();
+        final String playUrl = url != null ? url : ch.streamUrl;
+        // L'aperçu joue déjà ce flux : on transmet CE lecteur au plein écran (même connexion, image continue).
+        if (previewEngine != null && playUrl != null && playUrl.equals(previewEngine.getCurrentUrl())
+                && (previewEngine.isReady() || previewEngine.isBuffering())) {
+            if (previewEngine.isRecording()) previewEngine.stopRecording();
+            PlayerHandoff.offer(previewEngine, playUrl, previewView);
+            previewEngine = null;
+        } else if (previewEngine != null) {
+            previewEngine.pause();
+        }
         Intent i = new Intent(this, TvPlayerActivity.class);
         i.putExtra(TvPlayerActivity.EXTRA_ID,    ch.id);
         i.putExtra(TvPlayerActivity.EXTRA_NAME,  ch.name);
-        i.putExtra(TvPlayerActivity.EXTRA_URL,   url != null ? url : ch.streamUrl);
+        i.putExtra(TvPlayerActivity.EXTRA_URL,   playUrl);
         i.putExtra(TvPlayerActivity.EXTRA_TYPE,  ch.contentType);
         i.putExtra(TvPlayerActivity.EXTRA_GROUP, ch.groupTitle);
         i.putExtra(TvPlayerActivity.EXTRA_ORDER, ch.sortOrder);
@@ -630,6 +621,10 @@ public class TvMainActivity extends FragmentActivity {
                 || (interval > 0 && System.currentTimeMillis() - last > interval);
             if (due && !force && !empty && AppSettings.refreshWifiOnly(this) && !AppSettings.isOnWifi(this)) due = false;
             if (!due) { Log.d(TAG, "Sync ignorée (fréquence réglée)"); return; }
+            if (!syncRunning.compareAndSet(false, true)) {   // un cycle est déjà en cours
+                if (force) syncAgain = true;
+                return;
+            }
             runOnUiThread(() -> showSyncStatus("Chargement de vos chaînes…"));
             processNextDns(0, fUrls, fLogin, fPass, 0);
         });
@@ -646,31 +641,116 @@ public class TvMainActivity extends FragmentActivity {
 
     private void processNextDns(final int index, final String[] urls, final String login,
                                 final String password, final int accumulated) {
-        if (index >= urls.length) {
-            final int total = accumulated;
-            runOnUiThread(() -> {
-                hideSyncStatus();
-                if (isFinishing() || isDestroyed()) return;
-                if (total > 0) Toast.makeText(this, "✅ " + total + " chaînes chargées", Toast.LENGTH_SHORT).show();
-                getSharedPreferences(PREFS_ACT, MODE_PRIVATE).edit()
-                    .putLong("last_sync_ts", System.currentTimeMillis()).apply();
-                refreshCurrent();
-            });
-            return;
+        try {
+            processNextDnsStep(index, urls, login, password, accumulated);
+        } catch (Throwable t) {   // ne jamais laisser le cycle bloqué « en cours »
+            Log.e(TAG, "sync: " + t.getMessage(), t);
+            lastSyncError = t instanceof OutOfMemoryError ? "mémoire insuffisante"
+                : (t.getMessage() != null ? t.getMessage() : "erreur inattendue");
+            finishSync(accumulated);
         }
+    }
+
+    private void processNextDnsStep(final int index, final String[] urls, final String login,
+                                    final String password, final int accumulated) {
+        if (index == 0) { syncKeepIds.clear(); lastSyncError = null; }
+        if (index >= urls.length) { finishSync(accumulated); return; }
         String url = urls[index].trim();
         if (url.isEmpty()) { processNextDns(index + 1, urls, login, password, accumulated); return; }
         final int idx = index + 1;
         runOnUiThread(() -> showSyncStatus("📥 Serveur " + idx + "/" + urls.length + "…"));
         PlaylistEntity pl = findOrCreatePlaylist(login, password, url, idx);
+        syncKeepIds.add(pl.id);
         PlaylistLoader.load(pl, db, new PlaylistLoader.Callback() {
             @Override public void onDone(int count) {
                 bg(() -> processNextDns(index + 1, urls, login, password, accumulated + count));
             }
             @Override public void onError(String msg) {
                 Log.w(TAG, "DNS " + idx + " : " + msg);
+                lastSyncError = msg;
                 bg(() -> processNextDns(index + 1, urls, login, password, accumulated));
             }
+        });
+    }
+
+    /** Fin d'un cycle : purge des anciens DNS, message clair si rien n'a été chargé, nouvelle tentative auto. */
+    private void finishSync(final int total) {
+        if (total > 0) purgeObsoletePlaylists();   // DNS retirés du panel : on supprime leurs chaînes
+        final String err = lastSyncError;
+        syncRunning.set(false);
+        final boolean again = syncAgain;
+        syncAgain = false;
+        runOnUiThread(() -> {
+            hideSyncStatus();
+            if (isFinishing() || isDestroyed()) return;
+            if (total > 0) {
+                syncRetries = 0;
+                Toast.makeText(this, "✅ " + total + " chaînes chargées", Toast.LENGTH_SHORT).show();
+                getSharedPreferences(PREFS_ACT, MODE_PRIVATE).edit()
+                    .putLong("last_sync_ts", System.currentTimeMillis()).apply();
+            } else {
+                // Avant : l'échec était avalé et l'écran restait vide sans explication.
+                String why = err != null ? err : "aucune chaîne reçue";
+                showSyncStatus("⚠ Chargement impossible : " + why);
+                Toast.makeText(this, "Chargement des chaînes impossible : " + why, Toast.LENGTH_LONG).show();
+                if (syncRetries < 3) {
+                    syncRetries++;
+                    handler.postDelayed(() -> { if (!isFinishing() && !isDestroyed()) maybeSync(true); }, 20_000);
+                }
+            }
+            refreshCurrent();
+            if (again) maybeSync(true);
+        });
+    }
+
+    /** Playlists créées par l'activation (noms « IPTV #n », « M3U #n », « Abonnement IPTV »), pas celles ajoutées à la main. */
+    private static boolean isActivationPlaylist(PlaylistEntity pl) {
+        return pl.name != null && (pl.name.startsWith("IPTV #") || pl.name.startsWith("M3U #")
+            || pl.name.equals("Abonnement IPTV"));
+    }
+
+    private void purgeObsoletePlaylists() {
+        try {
+            for (PlaylistEntity pl : db.playlistDao().getAllSync()) {
+                if (isActivationPlaylist(pl) && !syncKeepIds.contains(pl.id)) {
+                    db.channelDao().deleteByPlaylist(pl.id);
+                    db.playlistDao().delete(pl);
+                }
+            }
+        } catch (Exception e) { Log.w(TAG, "purge: " + e.getMessage()); }
+    }
+
+    /**
+     * Interroge le panel : si les identifiants ou la liste de DNS ont changé (nouvelle playlist choisie par
+     * l'admin), le cache est mis à jour et la synchronisation est relancée. Plus besoin de vider les données.
+     * Hors ligne : on garde le cache et on ne fait rien.
+     */
+    private void refreshFromPanel(final boolean force) {
+        DeviceSecurity.check(this, new DeviceSecurity.Callback() {
+            @Override public void onActive(DeviceSecurity.ActivationResult r) {
+                SharedPreferences p = getSharedPreferences(PREFS_ACT, MODE_PRIVATE);
+                boolean changed = !r.login.equals(p.getString("login", ""))
+                    || !r.password.equals(p.getString("password", ""))
+                    || !ActivationManager.dnsKey(r).equals(p.getString("dns_urls", ""));
+                ActivationManager.cacheActive(TvMainActivity.this, r);
+                if (changed || force) runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (changed) syncRetries = 0;
+                    // Le cache vient d'être mis à jour : maybeSync relit les nouveaux DNS.
+                    getIntent().removeExtra(EXTRA_ACT_LOGIN);
+                    maybeSync(true);
+                });
+            }
+            @Override public void onInactive(String status, String message) {
+                if ("ERROR".equals(status)) return;   // réponse panel illisible : on ne casse rien
+                ActivationManager.clearCache(TvMainActivity.this, status);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    startActivity(new Intent(TvMainActivity.this, TvActivationActivity.class));
+                    finish();
+                });
+            }
+            @Override public void onError(String message) { /* hors ligne : on garde le cache */ }
         });
     }
 
@@ -714,6 +794,7 @@ public class TvMainActivity extends FragmentActivity {
     private void refreshCurrent() {
         if (isFinishing() || isDestroyed()) return;
         if (section == S_HOME) loadHome();
+        else if (isBrowse(section) && liveData == null) loadBrowse(section);
     }
 
     private void showSyncStatus(String msg) {
@@ -729,7 +810,7 @@ public class TvMainActivity extends FragmentActivity {
         SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_TV);
         if (si == null) { pillShown = false; tvSubPill.setVisibility(View.GONE); return; }
         pillShown = true;
-        tvSubPill.setVisibility(railExpanded ? View.VISIBLE : View.GONE);
+        tvSubPill.setVisibility(View.VISIBLE);
         tvSubPill.setText(si.active ? "Premium · " + si.daysLeft + " j" : "Expiré");
         if (!si.active || si.isExpiringSoon(5)) tvSubPill.setBackgroundResource(R.drawable.bg_alert);
     }
@@ -826,7 +907,8 @@ public class TvMainActivity extends FragmentActivity {
                 + (AppSettings.refreshWifiOnly(this) ? " · Wi-Fi uniquement" : ""), this::showRefreshFreq);
         addRow(R.drawable.ic_refresh, "Actualiser maintenant", "Retélécharger les chaînes", () -> {
             Toast.makeText(this, "Actualisation en cours…", Toast.LENGTH_SHORT).show();
-            maybeSync(true);
+            syncRetries = 0;
+            refreshFromPanel(true);
         });
         addRow(R.drawable.ic_chat, "Support WhatsApp", "Obtenir de l'aide rapidement", () -> openWhatsApp(""));
         addRow(R.drawable.ic_info, "À propos", "Wise IPTV — par W Design", () -> showSection(S_ABOUT));
@@ -1081,7 +1163,11 @@ public class TvMainActivity extends FragmentActivity {
             } else {
                 h.logo.setImageResource(R.drawable.ic_channel_placeholder);
             }
-            h.itemView.setOnFocusChangeListener((v, f) -> { if (f) select(ch, true); });
+            h.itemView.setScaleX(1f); h.itemView.setScaleY(1f);
+            h.itemView.setOnFocusChangeListener((v, f) -> {
+                v.animate().scaleX(f ? 1.08f : 1f).scaleY(f ? 1.08f : 1f).setDuration(140).start();
+                if (f) select(ch, true);
+            });
             h.itemView.setOnClickListener(v -> { select(ch, false); openPlayer(ch, ch.streamUrl); });
         }
 
@@ -1099,6 +1185,62 @@ public class TvMainActivity extends FragmentActivity {
         }
     }
 
+    /** Rangées style Netflix : une rangée horizontale par catégorie (une seule rangée pour Accueil / Favoris). */
+    private class RowsAdapter extends RecyclerView.Adapter<RowsAdapter.RVH> {
+        private final List<String> titles = new ArrayList<>();
+        private final List<List<ChannelEntity>> rows = new ArrayList<>();
+        private final RecyclerView.RecycledViewPool pool = new RecyclerView.RecycledViewPool();
+
+        RowsAdapter() { pool.setMaxRecycledViews(0, 30); }
+
+        void set(List<ChannelEntity> list) {
+            titles.clear(); rows.clear();
+            if (list != null && !list.isEmpty()) {
+                if (section == S_HOME || section == S_FAVS) {
+                    titles.add(""); rows.add(list);
+                } else {
+                    LinkedHashMap<String, List<ChannelEntity>> map = new LinkedHashMap<>();
+                    for (ChannelEntity c : list) {
+                        String g = c.groupTitle == null || c.groupTitle.trim().isEmpty() ? "Autres" : c.groupTitle.trim();
+                        List<ChannelEntity> l = map.get(g);
+                        if (l == null) { l = new ArrayList<>(); map.put(g, l); }
+                        l.add(c);
+                    }
+                    for (Map.Entry<String, List<ChannelEntity>> e : map.entrySet()) {
+                        titles.add(e.getKey()); rows.add(e.getValue());
+                    }
+                }
+            }
+            notifyDataSetChanged();
+        }
+
+        @NonNull @Override public RVH onCreateViewHolder(@NonNull ViewGroup p, int t) {
+            return new RVH(LayoutInflater.from(p.getContext()).inflate(R.layout.row_tv_rail, p, false));
+        }
+
+        @Override public void onBindViewHolder(@NonNull RVH h, int pos) {
+            String t = titles.get(pos);
+            h.title.setText(t);
+            h.title.setVisibility(t.isEmpty() ? View.GONE : View.VISIBLE);
+            h.inner.set(rows.get(pos));
+        }
+
+        @Override public int getItemCount() { return rows.size(); }
+
+        class RVH extends RecyclerView.ViewHolder {
+            final TextView title; final ChAdapter inner;
+            RVH(View v) {
+                super(v);
+                title = v.findViewById(R.id.rail_row_title);
+                RecyclerView rv = v.findViewById(R.id.rail_row_list);
+                rv.setLayoutManager(new LinearLayoutManager(v.getContext(), LinearLayoutManager.HORIZONTAL, false));
+                rv.setRecycledViewPool(pool);
+                inner = new ChAdapter();
+                rv.setAdapter(inner);
+            }
+        }
+    }
+
     // ── Cycle de vie / touches ────────────────────────────────────
 
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
@@ -1112,9 +1254,11 @@ public class TvMainActivity extends FragmentActivity {
 
     @Override protected void onResume() {
         super.onResume();
+        PlayerHandoff.discard();                 // lecteur déposé mais jamais repris → libéré
+        StatsReporter.report(this, false);       // stats + modèle de l'appareil → panel (1 envoi / 10 min max)
         bindSubscriptionPill();
         if (section == S_HOME) loadHome();
-        if (isBrowse(section) && previewEngine != null && selected != null) {
+        if (isBrowse(section) && selected != null) {
             handler.removeCallbacks(previewTask);
             handler.postDelayed(previewTask, 400);
         }

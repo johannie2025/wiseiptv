@@ -11,6 +11,8 @@ import com.wdesign.wiseiptv.core.db.AppDatabase;
 import com.wdesign.wiseiptv.core.db.entity.ChannelEntity;
 import com.wdesign.wiseiptv.core.epg.EpgClient;
 import com.wdesign.wiseiptv.core.player.PlayerEngine;
+import com.wdesign.wiseiptv.core.player.PlayerHandoff;
+import com.wdesign.wiseiptv.core.util.StatsReporter;
 import com.wdesign.wiseiptv.core.util.DataUsage;
 import com.wdesign.wiseiptv.core.util.Recorder;
 import java.util.List;
@@ -66,11 +68,27 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         if (tvGroup != null && groupTitle != null) tvGroup.setText(groupTitle);
         tvQuality.setText("Auto");
 
-        engine = new PlayerEngine(this, this);
-        engine.attachView(playerView);
-        engine.play(streamUrl);
-        long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
-        if (startPosition > 0) engine.seekTo(startPosition);
+        // L'accueil nous passe son lecteur d'aperçu en cours de lecture : on continue sans recharger le flux.
+        PlayerEngine handed = PlayerHandoff.take(streamUrl);
+        if (handed != null) {
+            engine = handed;
+            engine.setListener(this);
+            engine.setMuted(false);
+            PlayerView previewView = PlayerHandoff.takeView();
+            if (previewView != null && engine.getPlayer() != null)
+                PlayerView.switchTargetView(engine.getPlayer(), previewView, playerView);
+            else engine.attachView(playerView);
+            if (engine.isReady()) progressBar.setVisibility(View.GONE);
+            else if (engine.isBuffering()) progressBar.setVisibility(View.VISIBLE);
+            engine.setWatchLabel(channelName);
+        } else {
+            engine = new PlayerEngine(this, this);
+            engine.attachView(playerView);
+            engine.setWatchLabel(channelName);
+            engine.play(streamUrl);
+            long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
+            if (startPosition > 0) engine.seekTo(startPosition);
+        }
         saveState(true);
         loadNow();
         showOsd();
@@ -130,6 +148,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
                 sortOrder   = target.sortOrder;
                 tvName.setText(channelName);
                 if (tvGroup != null && groupTitle != null) tvGroup.setText(groupTitle);
+                engine.setWatchLabel(channelName);
                 engine.play(streamUrl);
                 saveState(true);
                 loadNow();
@@ -212,6 +231,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         super.onStop();
         if (engine != null) { saveState(!isFinishing()); engine.pause(); }
         DataUsage.flush(this);
+        StatsReporter.report(this, true);        // temps de visionnage + données → panel
     }
     @Override protected void onDestroy() {
         recorder.stop();
