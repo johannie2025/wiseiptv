@@ -24,11 +24,6 @@ public final class DeviceSecurity {
     private static final String TAG        = "DeviceSecurity";
     // AJOUTEZ explicitement '?action=check-device' pour correspondre à 100% avec l'en-tête de l'api
 	private static final String PANEL_URL = "https://wise.alwaysdata.net/iptv/api/index.php?action=check-device";	
-    /** URL d'une autre action du même panel (ex. "report-stats"). */
-    public static String panelUrl(String action) {
-        return PANEL_URL.replace("action=check-device", "action=" + action);
-    }
-
     private static final String PREFS_NAME = "wise_device";
     private static final String KEY_DEVICE = "device_key";
     private static final int    TIMEOUT_MS = 15_000;
@@ -80,9 +75,6 @@ public final class DeviceSecurity {
             try {
                 JSONObject payload = new JSONObject();
                 payload.put("device_key", key);
-                // Modèle de l'appareil & co (ignoré sans effet par un panel qui ne les connaît pas encore)
-                payload.put("device", com.wdesign.wiseiptv.core.util.DeviceInfo.toJson(ctx));
-                payload.put("device_model", com.wdesign.wiseiptv.core.util.DeviceInfo.model());
                 String response = postJson(PANEL_URL, payload.toString());
                 JSONObject json = new JSONObject(response);
                 String status = json.optString("status", "ERROR");
@@ -107,6 +99,7 @@ public final class DeviceSecurity {
                         dns
                     );
                     cb.onActive(r);
+                    com.wdesign.wiseiptv.core.util.StatsReporter.send(ctx, false);
                 } else {
                     cb.onInactive(status, json.optString("message", status));
                 }

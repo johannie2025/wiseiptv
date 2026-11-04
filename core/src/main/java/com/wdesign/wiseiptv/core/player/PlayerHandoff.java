@@ -1,57 +1,38 @@
 package com.wdesign.wiseiptv.core.player;
 
-import androidx.annotation.OptIn;
-import androidx.media3.common.util.UnstableApi;
-import androidx.media3.ui.PlayerView;
-import java.lang.ref.WeakReference;
+import android.os.Handler;
+import android.os.Looper;
 
 /**
- * Passage de relais « aperçu → lecteur plein écran ».
- *
- * L'écran d'accueil (aperçu animé) dépose ici son lecteur déjà en train de jouer ; l'écran du lecteur
- * le récupère et continue la lecture à l'endroit exact : le flux n'est ni rechargé ni reconnecté
- * (important : beaucoup d'abonnements IPTV limitent le nombre de connexions simultanées).
- *
- * Sécurité : un lecteur déposé mais jamais repris est libéré par {@link #discard()}.
+ * Passe le lecteur de l'aperçu (accueil) au lecteur plein écran SANS recharger le flux.
+ * L'écran d'accueil "offre" son moteur ; le lecteur le "prend" s'il s'agit de la même URL.
+ * Si personne ne le prend sous 6 s, le moteur est libéré (aucune fuite).
  */
-@OptIn(markerClass = UnstableApi.class)
 public final class PlayerHandoff {
-    private PlayerHandoff() {}
-
     private static PlayerEngine engine;
     private static String url;
-    private static WeakReference<PlayerView> fromView;
+    private static final Handler H = new Handler(Looper.getMainLooper());
+    private static final Runnable EXPIRE = () -> clear(true);
 
-    /** Dépose un lecteur en cours de lecture (l'ancien dépôt non repris est libéré). */
-    public static synchronized void offer(PlayerEngine e, String streamUrl, PlayerView from) {
-        if (engine != null && engine != e) engine.release();
-        engine = e;
-        url = streamUrl;
-        fromView = from != null ? new WeakReference<>(from) : null;
+    private PlayerHandoff() {}
+
+    public static synchronized void offer(PlayerEngine e, String streamUrl) {
+        clear(true);
+        engine = e; url = streamUrl;
+        H.postDelayed(EXPIRE, 6000);
     }
 
-    /** Récupère le lecteur déposé si c'est bien le même flux ; sinon renvoie null (rien n'est perdu). */
+    /** @return le moteur déjà en lecture pour cette URL, ou null. Le receveur en devient propriétaire. */
     public static synchronized PlayerEngine take(String streamUrl) {
-        if (engine == null) return null;
-        if (streamUrl == null || !streamUrl.equals(url)) { discard(); return null; }
-        PlayerEngine e = engine;
-        engine = null;
-        url = null;
+        if (engine == null || url == null || !url.equals(streamUrl)) return null;
+        PlayerEngine e = engine; engine = null; url = null;
+        H.removeCallbacks(EXPIRE);
         return e;
     }
 
-    /** Vue d'aperçu d'où vient le lecteur (à passer à PlayerView.switchTargetView). À appeler après take(). */
-    public static synchronized PlayerView takeView() {
-        PlayerView v = fromView != null ? fromView.get() : null;
-        fromView = null;
-        return v;
+    private static synchronized void clear(boolean release) {
+        H.removeCallbacks(EXPIRE);
+        if (engine != null && release) engine.release();
+        engine = null; url = null;
     }
-
-    /** Libère un lecteur déposé mais jamais repris. */
-    public static synchronized void discard() {
-        if (engine != null) { try { engine.release(); } catch (Exception ignored) { } }
-        engine = null; url = null; fromView = null;
-    }
-
-    public static synchronized boolean hasPending() { return engine != null; }
 }
