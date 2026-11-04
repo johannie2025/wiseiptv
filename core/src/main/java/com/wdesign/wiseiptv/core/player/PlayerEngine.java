@@ -9,6 +9,8 @@ import androidx.media3.common.*;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.*;
 import androidx.media3.exoplayer.trackselection.*;
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy;
 import androidx.media3.datasource.*;
 import androidx.media3.datasource.okhttp.OkHttpDataSource;
 import androidx.media3.ui.PlayerView;
@@ -19,6 +21,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 @OptIn(markerClass = UnstableApi.class)
 public class PlayerEngine {
     private static final String TAG = "PlayerEngine";
+
+    /** User-Agent navigateur automatique — obligatoire pour de nombreux flux IPTV. */
+    private static final String USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     public interface Listener {
         void onBuffering(boolean buffering);
@@ -45,15 +51,17 @@ public class PlayerEngine {
     }
 
     private void buildPlayer() {
-        // OPTIMISATION CLIENT HTTP : Reconnexion automatique active (Anti-Freezing)
+        // Client HTTP robuste : timeouts longs + reconnexion auto
         OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(true) // Relance instantanément la requête si le flux lâche
+            .readTimeout(90, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
             .build();
 
         final Context appCtx = context;
         DataSource.Factory dsFactory = new OkHttpDataSource.Factory(http)
+            .setUserAgent(USER_AGENT)   // User-Agent automatique (navigateur)
             .setTransferListener(new androidx.media3.datasource.TransferListener() {
                 @Override public void onTransferInitializing(DataSource s, DataSpec d, boolean n) {}
                 @Override public void onTransferStart(DataSource s, DataSpec d, boolean n) {}
@@ -66,16 +74,35 @@ public class PlayerEngine {
         final DataSource.Factory baseFactory = dsFactory;
         final DataSource.Factory teeFactory = () -> new TeeDataSource(baseFactory.createDataSource(), PlayerEngine.this);
 
-        // OPTIMISATION BUFFERING (DefaultLoadControl) : Évite les micro-coupures
+        // Buffers adaptés : plus larges en mode économie de données (connexion faible)
+        boolean saver = com.wdesign.wiseiptv.core.util.AppSettings.networkMode(context)
+                == com.wdesign.wiseiptv.core.util.AppSettings.NET_SAVER;
         DefaultLoadControl lc = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                25_000,  // Min Buffer (Défaut: 15s -> Passé à 25s pour encaisser la gigue réseau)
-                60_000,  // Max Buffer (Garde jusqu'à 60s de flux max en mémoire)
-                2_500,   // Buffer initial requis avant de lancer la vidéo (Sécurité à l'ouverture)
-                5_000    // Buffer requis pour relancer après un freeze (Évite les boucles de buffering)
+                saver ? 45_000 : 25_000,   // min buffer
+                saver ? 120_000 : 60_000,  // max buffer
+                saver ? 8_000  : 2_500,    // buffer avant démarrage
+                saver ? 15_000 : 5_000     // buffer après rebuffer
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
+
+        // Politique de retry : 3 tentatives sur erreur de chargement (réseau, 404 temporaire, etc.)
+        LoadErrorHandlingPolicy errorPolicy = new DefaultLoadErrorHandlingPolicy() {
+            @Override
+            public long getRetryDelayMsFor(LoadErrorInfo loadErrorInfo) {
+                int count = loadErrorInfo.errorCount;
+                if (count <= 3) {
+                    // 1s, 2s, 4s
+                    return 1000L * (1L << (count - 1));
+                }
+                return C.TIME_UNSET; // abandon après 3 essais
+            }
+            @Override
+            public int getMinimumLoadableRetryCount(int dataType) {
+                return 3;
+            }
+        };
 
         DefaultTrackSelector ts = new DefaultTrackSelector(context);
         DefaultTrackSelector.Parameters.Builder tsb = ts.buildUponParameters()
@@ -96,7 +123,10 @@ public class PlayerEngine {
         exoPlayer = new ExoPlayer.Builder(context)
             .setLoadControl(lc)
             .setTrackSelector(ts)
-            .setMediaSourceFactory(new DefaultMediaSourceFactory(teeFactory))
+            .setMediaSourceFactory(
+                new DefaultMediaSourceFactory(teeFactory)
+                    .setLoadErrorHandlingPolicy(errorPolicy)
+            )
             .build();
 
         exoPlayer.addListener(new Player.Listener() {
@@ -115,10 +145,47 @@ public class PlayerEngine {
             }
 
             @Override public void onPlayerError(PlaybackException e) {
-                Log.e(TAG, "ExoPlayer Error: " + e.getMessage());
-                listener.onError(e.getMessage() != null ? e.getMessage() : "Erreur de lecture du flux");
+                Log.e(TAG, "ExoPlayer Error: " + e.getMessage(), e);
+                listener.onError(friendlyError(e));
             }
         });
+    }
+
+    /** Traduit les erreurs techniques ExoPlayer en messages clairs. */
+    private static String friendlyError(PlaybackException e) {
+        if (e == null) return "Erreur de lecture du flux";
+        int code = e.errorCode;
+        String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+
+        if (code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+                || code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+                || msg.contains("timeout") || msg.contains("unable to connect")) {
+            return "Connexion réseau impossible ou trop lente";
+        }
+        if (code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
+                || msg.contains("403") || msg.contains("401")) {
+            return "Accès refusé par le serveur (403/401)";
+        }
+        if (code == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND
+                || msg.contains("404")) {
+            return "Flux introuvable (404) — lien mort ou expiré";
+        }
+        if (code == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED
+                || code == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED
+                || msg.contains("format") || msg.contains("unsupported")) {
+            return "Format de flux non supporté";
+        }
+        if (code == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED
+                || code == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED) {
+            return "Erreur décodeur vidéo/audio de l'appareil";
+        }
+        if (msg.contains("source error") || msg.contains("source")) {
+            return "Erreur source — flux inaccessible ou bloqué";
+        }
+        // Message original tronqué si trop long
+        String raw = e.getMessage();
+        if (raw != null && raw.length() > 80) raw = raw.substring(0, 77) + "…";
+        return raw != null ? raw : "Erreur de lecture du flux";
     }
 
     public void attachView(PlayerView v) { 
