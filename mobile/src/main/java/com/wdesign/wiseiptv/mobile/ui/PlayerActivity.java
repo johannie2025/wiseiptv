@@ -484,7 +484,7 @@ public class PlayerActivity extends AppCompatActivity
             ProgressBar pb = row.findViewById(R.id.epg_progress);
             pb.setVisibility(isNow ? View.VISIBLE : View.GONE);
             pb.setProgress(p.progress(now));
-            row.findViewById(R.id.iv_epg_replay).setVisibility(past && p.archive ? View.VISIBLE : View.GONE);
+            row.findViewById(R.id.iv_epg_replay).setVisibility(past && (p.archive || epgSource != null) ? View.VISIBLE : View.GONE);
             if (isNow) row.setBackgroundResource(R.drawable.bg_card_hero);
             row.setOnClickListener(v -> onProgramClick(p, past, isNow));
             epgList.addView(row);
@@ -494,7 +494,7 @@ public class PlayerActivity extends AppCompatActivity
     private void onProgramClick(EpgClient.Program p, boolean past, boolean isNow) {
         if (isNow) { backToLive(); return; }
         if (past) {
-            if (!p.archive || epgSource == null) {
+            if (epgSource == null) {
                 Toast.makeText(this, "Replay indisponible pour ce programme.", Toast.LENGTH_SHORT).show();
                 return;
             }
