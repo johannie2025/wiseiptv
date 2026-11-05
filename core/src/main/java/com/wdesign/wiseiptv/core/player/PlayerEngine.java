@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy;
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter;
+import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
@@ -47,10 +48,15 @@ public class PlayerEngine {
     private int mimeStep = 0;
     private boolean released = false;
     private Runnable pendingRetry;
+    private DefaultBandwidthMeter meter;
+    private boolean forcedLowest = false, triedM3u8 = false;
+    private final java.util.ArrayDeque<Long> rebuffers = new java.util.ArrayDeque<>();
+    private boolean wasReady = false;
     private final Runnable watchTick = new Runnable() {
         @Override public void run() {
             if (released) return;
             if (exoPlayer != null && exoPlayer.isPlaying()) com.wdesign.wiseiptv.core.util.WatchStats.tick(context, 5);
+            adaptToBandwidth();
             retryHandler.postDelayed(this, 5000);
         }
     };
@@ -65,7 +71,7 @@ public class PlayerEngine {
         // OPTIMISATION CLIENT HTTP : Reconnexion automatique active (Anti-Freezing)
         OkHttpClient http = new OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(45, TimeUnit.SECONDS)
             .callTimeout(0, TimeUnit.SECONDS)
             .followRedirects(true).followSslRedirects(true)
             .connectionPool(new okhttp3.ConnectionPool(4, 2, TimeUnit.MINUTES))
@@ -90,14 +96,14 @@ public class PlayerEngine {
         // OPTIMISATION BUFFERING (DefaultLoadControl) : Évite les micro-coupures
         // Débits très bas : démarrage rapide (1,5 s), grosse marge anti-rebuffering (4 s), tampon max 50 s
         DefaultLoadControl lc = new DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 50_000, 1_500, 4_000)
+            .setBufferDurationsMs(25_000, 90_000, 2_500, 7_000)
             .setBackBuffer(10_000, false)
             .setTargetBufferBytes(C.LENGTH_UNSET)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build();
         // Estimation de débit initiale prudente (≈ 1,2 Mb/s) puis adaptation continue
-        DefaultBandwidthMeter meter = new DefaultBandwidthMeter.Builder(context)
-            .setInitialBitrateEstimate(1_200_000L).setResetOnNetworkTypeChange(true).build();
+        meter = new DefaultBandwidthMeter.Builder(context)
+            .setInitialBitrateEstimate(500_000L).setResetOnNetworkTypeChange(true).build();
         final LoadErrorHandlingPolicy retryPolicy = new DefaultLoadErrorHandlingPolicy() {
             @Override public int getMinimumLoadableRetryCount(int dataType) { return 8; }
             @Override public long getRetryDelayMsFor(LoadErrorInfo info) {
@@ -106,7 +112,9 @@ public class PlayerEngine {
             }
         };
 
-        DefaultTrackSelector ts = new DefaultTrackSelector(context);
+        // Adaptation prudente : on descend vite (6 s), on remonte lentement (8 s), 65 % du débit mesuré utilisé
+        DefaultTrackSelector ts = new DefaultTrackSelector(context,
+            new AdaptiveTrackSelection.Factory(8_000, 6_000, 25_000, 0.65f));
         DefaultTrackSelector.Parameters.Builder tsb = ts.buildUponParameters()
             .setAllowVideoMixedMimeTypeAdaptiveness(true);
         int al = com.wdesign.wiseiptv.core.util.AppSettings.audioLangIndex(context);
@@ -144,9 +152,11 @@ public class PlayerEngine {
         exoPlayer.addListener(new Player.Listener() {
             @Override public void onPlaybackStateChanged(int st) {
                 if (st == Player.STATE_BUFFERING) {
+                    if (wasReady) onRebuffer();
                     listener.onBuffering(true);
                 } else if (st == Player.STATE_READY) {
                     retryCount = 0;
+                    wasReady = true;
                     listener.onBuffering(false);
                     listener.onPlaying();
                 }
@@ -157,6 +167,19 @@ public class PlayerEngine {
                 handleError(e);
             }
         });
+    }
+
+    /** Mode Auto : mesure le débit réel et force la plus basse qualité quand il est très faible. */
+    private void adaptToBandwidth() {
+        if (exoPlayer == null || meter == null || currentQuality != 0) return;
+        long est = meter.getBitrateEstimate();
+        if (!forcedLowest && est > 0 && est < 450_000L) {
+            forcedLowest = true;
+            exoPlayer.setTrackSelectionParameters(exoPlayer.getTrackSelectionParameters().buildUpon().setForceLowestBitrate(true).build());
+        } else if (forcedLowest && est > 1_200_000L) {
+            forcedLowest = false;
+            exoPlayer.setTrackSelectionParameters(exoPlayer.getTrackSelectionParameters().buildUpon().setForceLowestBitrate(false).build());
+        }
     }
 
     /** Reprise automatique : fenêtre live dépassée, mauvais type détecté, coupures réseau (backoff 1→8 s). */
@@ -187,6 +210,19 @@ public class PlayerEngine {
         listener.onError("Flux indisponible. Vérifiez votre connexion ou changez de chaîne.");
     }
 
+    /** 3 coupures en 90 s sur un flux Xtream .ts → bascule automatique vers .m3u8 (souvent plus tolérant). */
+    private void onRebuffer() {
+        long now = System.currentTimeMillis();
+        rebuffers.addLast(now);
+        while (!rebuffers.isEmpty() && now - rebuffers.peekFirst() > 90_000) rebuffers.pollFirst();
+        if (rebuffers.size() >= 3 && !triedM3u8 && currentUrl != null
+            && currentUrl.matches("(?i)^https?://[^?]+/(live/)?[^/]+/[^/]+/\\d+\\.ts$")) {
+            triedM3u8 = true; rebuffers.clear(); wasReady = false;
+            currentUrl = currentUrl.replaceAll("(?i)\\.ts$", ".m3u8");
+            load(currentUrl);
+        }
+    }
+
     private void load(String url) {
         MediaItem.Builder mb = new MediaItem.Builder().setUri(Uri.parse(url))
             .setLiveConfiguration(new MediaItem.LiveConfiguration.Builder()
@@ -209,7 +245,7 @@ public class PlayerEngine {
     public void play(String url) {
         if (url == null || url.isEmpty() || exoPlayer == null) return;
         if (pendingRetry != null) retryHandler.removeCallbacks(pendingRetry);
-        currentUrl = url; retryCount = 0; mimeStep = 0;
+        currentUrl = url; retryCount = 0; mimeStep = 0; triedM3u8 = false; wasReady = false; rebuffers.clear();
         load(url);
     }
 
