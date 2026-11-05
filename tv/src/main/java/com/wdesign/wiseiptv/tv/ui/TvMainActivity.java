@@ -96,10 +96,19 @@ public class TvMainActivity extends FragmentActivity {
         tvPreviewLive, tvSubPill;
     private ProgressBar progressBar, previewLoading;
     private PlayerView previewView;
-    private RecyclerView rvList;
-    private ChAdapter adapter;
+    private RecyclerView rvList, rvGrid, rvRow, rvSide;
+    private EditText topSearch;
+    private boolean listMode;
+    private String searchQuery = "";
+    private final Runnable searchTask = this::runSearchNow;
+    private View panelHome;
+    private TextView homeTitle, homeSub, homeStatus, homeResumeName, homeResumeSub;
+    private ImageView homeResumeLogo;
+    private ChAdapter adapterGrid, adapterRow;
+    private ChannelEntity resumeCh;
+    private ChAdapter adapter, adapterSide;
     private final View[] navViews = new View[NAV_LABELS.length];
-    private boolean railExpanded = true, pillShown;
+
 
     // État
     private int section = S_HOME;
@@ -137,25 +146,51 @@ public class TvMainActivity extends FragmentActivity {
         tvSyncStatus = findViewById(R.id.tv_sync_status);
         tvEmpty      = findViewById(R.id.tv_empty);
         tvPreviewLive = findViewById(R.id.tv_preview_live);
-        tvSubPill    = findViewById(R.id.tv_sub_pill);
+        tvSubPill    = findViewById(R.id.home_status);
         progressBar  = findViewById(R.id.progress_bar);
         previewLoading = findViewById(R.id.preview_loading);
         previewView  = findViewById(R.id.tv_preview_player);
         rvList       = findViewById(R.id.rv_list);
 
-        adapter = new ChAdapter();
-        rvList.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
-        rvList.setAdapter(adapter);
+        panelHome = findViewById(R.id.panel_home);
+        homeTitle = findViewById(R.id.home_title);
+        homeSub = findViewById(R.id.home_sub);
+        homeStatus = findViewById(R.id.home_status);
+        homeResumeName = findViewById(R.id.home_resume_name);
+        homeResumeSub = findViewById(R.id.home_resume_sub);
+        homeResumeLogo = findViewById(R.id.home_resume_logo);
+        rvGrid = findViewById(R.id.home_grid);
+        rvRow = findViewById(R.id.home_row);
+        adapterGrid = new ChAdapter(true);
+        adapterRow = new ChAdapter(true);
+        rvGrid.setLayoutManager(new androidx.recyclerview.widget.GridLayoutManager(this, 2, RecyclerView.HORIZONTAL, false));
+        rvGrid.setAdapter(adapterGrid);
+        rvRow.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        rvRow.setAdapter(adapterRow);
+        View.OnClickListener openSel = v -> { if (selected != null) openPlayer(selected, previewUrl); };
+        findViewById(R.id.home_hero).setOnClickListener(openSel);
+        findViewById(R.id.home_resume).setOnClickListener(v -> { if (resumeCh != null) { select(resumeCh, false); openPlayer(resumeCh, resumeCh.streamUrl); } });
+        adapter = new ChAdapter(false);
+        adapterSide = new ChAdapter(false);
+        adapterSide.rowMode = true;
+        rvSide = findViewById(R.id.rv_side);
+        rvSide.setLayoutManager(new LinearLayoutManager(this));
+        rvSide.setAdapter(adapterSide);
+        listMode = getSharedPreferences(PREFS_STATE, MODE_PRIVATE).getBoolean("view_list", false);
+        applyViewMode();
+        findViewById(R.id.btn_view_grid).setOnClickListener(v -> setListMode(false));
+        findViewById(R.id.btn_view_list).setOnClickListener(v -> setListMode(true));
+        findViewById(R.id.home_avatar).setOnClickListener(v -> showSection(S_ACCOUNT));
+        setupSearchBar();
 
         buildNav();
-        setupRailAndPreviewSize();
         bindSubscriptionPill();
 
         btnWatch.setOnClickListener(v -> { if (selected != null) openPlayer(selected, previewUrl); });
         btnFav.setOnClickListener(v -> toggleFavorite());
         btnLive.setOnClickListener(v -> backToLive());
 
-        Fx.stagger(40, 70, findViewById(R.id.nav_rail), findViewById(R.id.panel_browse));
+        Fx.stagger(40, 70, findViewById(R.id.top_bar), findViewById(R.id.nav_rail));
 
         // Reprise : ouvrir directement le lecteur si l'app a été fermée pendant la lecture
         if (savedInstanceState == null) resumePlayerIfNeeded();
@@ -175,19 +210,85 @@ public class TvMainActivity extends FragmentActivity {
     private void buildNav() {
         LayoutInflater inf = getLayoutInflater();
         for (int i = 0; i < NAV_LABELS.length; i++) {
+            if (i == S_SEARCH || i == S_ACCOUNT) continue;   // recherche = barre, compte = avatar
             final int idx = i;
-            View v = inf.inflate(R.layout.item_tv_nav, navItems, false);
+            View v = inf.inflate(R.layout.item_tv_topnav, navItems, false);
             ((ImageView) v.findViewById(R.id.nav_icon)).setImageResource(NAV_ICONS[i]);
             ((TextView) v.findViewById(R.id.nav_label)).setText(NAV_LABELS[i]);
             v.setOnClickListener(x -> showSection(idx));
-            v.setOnFocusChangeListener((x, f) -> { if (f && idx != S_SEARCH) showSection(idx); });
+            v.setOnFocusChangeListener((x, f) -> { if (f) showSection(idx); });
             navItems.addView(v);
             navViews[i] = v;
         }
     }
 
+    // ── Recherche intégrée à la barre du haut (saisie directe, sans fenêtre) ──
+    private void setupSearchBar() {
+        topSearch = findViewById(R.id.top_search);
+        topSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c, int a, int b, int d) { }
+            @Override public void onTextChanged(CharSequence c, int a, int b, int d) { }
+            @Override public void afterTextChanged(android.text.Editable e) {
+                searchQuery = e.toString().trim();
+                handler.removeCallbacks(searchTask);
+                handler.postDelayed(searchTask, 350);
+            }
+        });
+        topSearch.setOnEditorActionListener((v, actionId, ev) -> {
+            handler.removeCallbacks(searchTask); runSearchNow();
+            android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+            return true;
+        });
+    }
+
+    private void runSearchNow() {
+        final String q = searchQuery;
+        if (isFinishing() || isDestroyed()) return;
+        if (q.length() < 2) {
+            if (section == S_SEARCH) showSection(S_LIVE);
+            return;
+        }
+        bg(() -> {
+            final List<ChannelEntity> res = db.channelDao().searchSync(q);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || !q.equals(searchQuery)) return;
+                detachLiveData();
+                section = S_SEARCH;
+                highlightNav(S_SEARCH);
+                panelPage.setVisibility(View.GONE);
+                panelHome.setVisibility(View.GONE);
+                setBackdrop(true);
+                panelBrowse.setVisibility(View.VISIBLE);
+                tvListTitle.setText("Résultats : " + q);
+                selected = null;
+                setList(res);
+            });
+        });
+    }
+
+    private void setListMode(boolean list) {
+        listMode = list;
+        getSharedPreferences(PREFS_STATE, MODE_PRIVATE).edit().putBoolean("view_list", list).apply();
+        applyViewMode();
+    }
+
+    /** Grille (navigation dans les 4 sens) ou liste. */
+    private void applyViewMode() {
+        adapter.rowMode = listMode;
+        rvList.setLayoutManager(listMode ? new LinearLayoutManager(this)
+            : new androidx.recyclerview.widget.GridLayoutManager(this, 4));
+        rvList.setAdapter(adapter);
+        findViewById(R.id.btn_view_grid).setSelected(!listMode);
+        findViewById(R.id.btn_view_list).setSelected(listMode);
+        findViewById(R.id.btn_view_grid).setAlpha(listMode ? 0.55f : 1f);
+        findViewById(R.id.btn_view_list).setAlpha(listMode ? 1f : 0.55f);
+    }
+
     private void showSection(int s) {
-        if (s == S_SEARCH) { showSearchDialog(); return; }
+        if (s == S_SEARCH) return;
+        if (topSearch != null && searchQuery.length() > 0 && section == S_SEARCH) { handler.removeCallbacks(searchTask); searchQuery = ""; topSearch.setText(""); }
         if (s == section && liveData != null && isBrowse(s) && panelBrowse.getVisibility() == View.VISIBLE) {
             highlightNav(s);
             return;
@@ -196,15 +297,26 @@ public class TvMainActivity extends FragmentActivity {
         getSharedPreferences(PREFS_STATE, MODE_PRIVATE).edit().putInt("section", s).apply();
         highlightNav(s);
         detachLiveData();
-        if (isBrowse(s)) {
+        if (s == S_HOME) {
             previewUrl = null;
             panelPage.setVisibility(View.GONE);
+            panelBrowse.setVisibility(View.GONE);
+            panelHome.setVisibility(View.VISIBLE);
+            setBackdrop(false);
+            loadHome();
+        } else if (isBrowse(s)) {
+            previewUrl = null;
+            panelPage.setVisibility(View.GONE);
+            panelHome.setVisibility(View.GONE);
+            setBackdrop(true);
             panelBrowse.setVisibility(View.VISIBLE);
             tvListTitle.setText(NAV_LABELS[s]);
             loadBrowse(s);
         } else {
             stopPreview();
             AdaptiveBg.reset(findViewById(R.id.main_root));
+            panelHome.setVisibility(View.GONE);
+            setBackdrop(false);
             panelBrowse.setVisibility(View.GONE);
             tvEmpty.setVisibility(View.GONE);
             panelPage.setVisibility(View.VISIBLE);
@@ -218,43 +330,30 @@ public class TvMainActivity extends FragmentActivity {
 
     private boolean isBrowse(int s) { return s <= S_FAVS; }
 
-    /** Menu latéral réduit aux icônes quand le focus est dans la liste / l'aperçu ; aperçu 16:9 pleine largeur. */
-    private void setupRailAndPreviewSize() {
-        final View rail = findViewById(R.id.nav_rail);
-        getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
-            if (newF == null) return;
-            boolean inNav = false;
-            View v = newF;
-            while (v != null) {
-                if (v == rail) { inNav = true; break; }
-                android.view.ViewParent vp = v.getParent();
-                v = vp instanceof View ? (View) vp : null;
-            }
-            setRailExpanded(inNav);
-        });
-    }
-
-    private void setRailExpanded(boolean expand) {
-        if (expand == railExpanded) return;
-        railExpanded = expand;
-        final View rail = findViewById(R.id.nav_rail);
-        final int to = dp(expand ? 240 : 80);
-        int from = rail.getWidth() > 0 ? rail.getWidth() : dp(expand ? 80 : 240);
-        for (View nv : navViews) nv.findViewById(R.id.nav_label).setVisibility(expand ? View.VISIBLE : View.GONE);
-        findViewById(R.id.rail_title).setVisibility(expand ? View.VISIBLE : View.GONE);
-        tvSubPill.setVisibility(expand && pillShown ? View.VISIBLE : View.GONE);
-        android.animation.ValueAnimator va = android.animation.ValueAnimator.ofInt(from, to);
-        va.setDuration(160);
-        va.addUpdateListener(a -> {
-            ViewGroup.LayoutParams lp = rail.getLayoutParams();
-            lp.width = (int) a.getAnimatedValue();
-            rail.setLayoutParams(lp);
-        });
-        va.start();
+    /** true : l'aperçu plein écran sert de fond (sections chaînes) ; false : fond du thème (accueil / pages). */
+    private void setBackdrop(boolean on) {
+        int vis = on ? View.VISIBLE : View.GONE;
+        findViewById(R.id.preview_card).setVisibility(vis);
+        findViewById(R.id.scrim_a).setVisibility(vis);
+        findViewById(R.id.scrim_b).setVisibility(vis);
+        PlayerView target = (section == S_HOME) ? (PlayerView) findViewById(R.id.home_preview)
+                                                 : (PlayerView) findViewById(R.id.tv_preview_player);
+        if (target != previewView) {
+            if (previewView != null) previewView.setPlayer(null);
+            previewView = target;
+            if (previewEngine != null) previewEngine.attachView(previewView);
+        }
     }
 
     private void highlightNav(int s) {
-        for (int i = 0; i < navViews.length; i++) navViews[i].setSelected(i == s);
+        for (int i = 0; i < navViews.length; i++) {
+            if (navViews[i] == null) continue;
+            boolean on = i == s;
+            navViews[i].setSelected(on);
+            navViews[i].findViewById(R.id.nav_label).setVisibility(on ? View.VISIBLE : View.GONE);
+        }
+        View av = findViewById(R.id.home_avatar);
+        if (av != null) av.setAlpha(s == S_ACCOUNT ? 1f : 0.85f);
     }
 
     private void detachLiveData() {
@@ -295,18 +394,41 @@ public class TvMainActivity extends FragmentActivity {
                 out = db.channelDao().randomLiveWithLogo(30);
                 if (out == null || out.size() < 10) out = db.channelDao().randomLive(30);
             }
-            final List<ChannelEntity> fl = out;
+            final List<ChannelEntity> fl = ParentalControl.filter(this, out);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed() || section != S_HOME) return;
-                tvListTitle.setText(recents ? "Récemment regardées" : "Chaînes à découvrir");
-                setList(fl);
+                bindHome(fl, recents);
             });
         });
+    }
+
+    private void bindHome(List<ChannelEntity> list, boolean recents) {
+        SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_TV);
+        boolean empty = list == null || list.isEmpty();
+        tvEmpty.setText("Aucune chaîne.\nLa synchronisation est peut-être en cours…");
+        tvEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
+        if (empty) { adapterGrid.set(null); adapterRow.set(null); adapterSide.set(null); selected = null; stopPreview(); return; }
+        adapterSide.set(new ArrayList<>(list));
+        tvListTitle.setText("Chaînes");
+        adapterGrid.set(new ArrayList<>(list.subList(0, Math.min(list.size(), 14))));
+        List<ChannelEntity> rest = list.size() > 14 ? new ArrayList<>(list.subList(14, list.size())) : new ArrayList<>(list);
+        adapterRow.set(rest);
+        resumeCh = list.get(0);
+        homeResumeName.setText(resumeCh.name);
+        homeResumeSub.setText(recents ? "Dernière chaîne regardée" : "Suggestion");
+        if (resumeCh.logoUrl != null && !resumeCh.logoUrl.isEmpty())
+            Glide.with(homeResumeLogo).load(resumeCh.logoUrl).fitCenter().placeholder(R.drawable.ic_channel_placeholder).into(homeResumeLogo);
+        else homeResumeLogo.setImageResource(R.drawable.ic_channel_placeholder);
+        long last = getSharedPreferences(PREFS_STATE, MODE_PRIVATE).getLong("last_channel", -1);
+        ChannelEntity pick = list.get(0);
+        for (ChannelEntity c : list) if (c.id == last) { pick = c; break; }
+        select(pick, false);
     }
 
     private void setList(List<ChannelEntity> raw) {
         List<ChannelEntity> list = ParentalControl.filter(this, raw);
         adapter.set(list);
+        adapterSide.set(list);
         boolean empty = list == null || list.isEmpty();
         tvEmpty.setText(section == S_FAVS ? "Aucun favori pour le moment."
             : "Aucune chaîne.\nLa synchronisation est peut-être en cours…");
@@ -331,6 +453,9 @@ public class TvMainActivity extends FragmentActivity {
         getSharedPreferences(PREFS_STATE, MODE_PRIVATE).edit().putLong("last_channel", ch.id).apply();
         tvInfoName.setText(ch.name);
         tvInfoGroup.setText(ch.groupTitle == null ? "" : ch.groupTitle);
+        homeTitle.setText(ch.name);
+        homeSub.setText(ch.groupTitle == null ? "En direct" : ch.groupTitle + " · En direct");
+        View hpb = findViewById(R.id.home_progress); if (hpb != null) hpb.setVisibility(View.GONE);
         updateFavLabel();
         tvPreviewLive.setVisibility(ch.contentType == ChannelEntity.TYPE_LIVE
             && AppSettings.liveBadges(this) ? View.VISIBLE : View.GONE);
@@ -412,13 +537,22 @@ public class TvMainActivity extends FragmentActivity {
         }
         tvEpgEmpty.setVisibility(View.GONE);
         long now = System.currentTimeMillis() / 1000;
+        // Accueil : programme en cours + progression sur la carte vedette
+        ProgressBar hp = findViewById(R.id.home_progress);
+        for (EpgClient.Program cur : list) {
+            if (cur.isNow(now)) {
+                homeSub.setText(cur.title + " · " + cur.time());
+                if (hp != null) { hp.setVisibility(View.VISIBLE); hp.setProgress(cur.progress(now)); }
+                break;
+            }
+        }
         LayoutInflater inf = getLayoutInflater();
         for (final EpgClient.Program p : list) {
             View row = inf.inflate(R.layout.row_tv_epg, epgList, false);
             ((TextView) row.findViewById(R.id.tv_epg_time)).setText(p.time());
             ((TextView) row.findViewById(R.id.tv_epg_title)).setText(p.title);
             boolean isNow = p.isNow(now);
-            boolean canReplay = p.isPast(now) && p.archive;
+            boolean canReplay = p.isPast(now) && (p.archive || epgSource != null);
             if (isNow) {
                 row.findViewById(R.id.tv_epg_now).setVisibility(View.VISIBLE);
                 ProgressBar pb = row.findViewById(R.id.epg_progress);
@@ -573,34 +707,6 @@ public class TvMainActivity extends FragmentActivity {
 
     // ── Recherche ─────────────────────────────────────────────────
 
-    private void showSearchDialog() {
-        final EditText et = new EditText(this);
-        et.setHint("Nom de chaîne, film, série…");
-        et.setSingleLine(true);
-        et.setTextColor(0xFFFFFFFF);
-        et.setHintTextColor(0xFF8FA6CC);
-        new AlertDialog.Builder(this).setTitle("🔍 Rechercher").setView(et)
-            .setPositiveButton("Chercher", (d, w) -> {
-                final String q = et.getText().toString().trim();
-                if (q.isEmpty()) return;
-                bg(() -> {
-                    final List<ChannelEntity> res = db.channelDao().searchSync(q);
-                    runOnUiThread(() -> {
-                        if (isFinishing() || isDestroyed()) return;
-                        detachLiveData();
-                        section = S_SEARCH;
-                        highlightNav(S_SEARCH);
-                        panelPage.setVisibility(View.GONE);
-                        panelBrowse.setVisibility(View.VISIBLE);
-                        tvListTitle.setText("Résultats : " + q);
-                        selected = null;
-                        setList(res);
-                    });
-                });
-            })
-            .setNegativeButton("Annuler", null).show();
-    }
-
     // ── Synchronisation (fréquence réglable dans Paramètres) ──────
 
     private void maybeSync(final boolean force) {
@@ -725,11 +831,10 @@ public class TvMainActivity extends FragmentActivity {
 
     private void bindSubscriptionPill() {
         SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_TV);
-        if (si == null) { pillShown = false; tvSubPill.setVisibility(View.GONE); return; }
-        pillShown = true;
-        tvSubPill.setVisibility(railExpanded ? View.VISIBLE : View.GONE);
+        if (si == null) { tvSubPill.setVisibility(View.GONE); return; }
+        tvSubPill.setVisibility(View.VISIBLE);
         tvSubPill.setText(si.active ? "Premium · " + si.daysLeft + " j" : "Expiré");
-        if (!si.active || si.isExpiringSoon(5)) tvSubPill.setBackgroundResource(R.drawable.bg_alert);
+        tvSubPill.setBackgroundResource(!si.active || si.isExpiringSoon(5) ? R.drawable.bg_alert : R.drawable.bg_badge_green);
     }
 
     private void buildAccountPage() {
@@ -1057,6 +1162,9 @@ public class TvMainActivity extends FragmentActivity {
 
     private class ChAdapter extends RecyclerView.Adapter<ChAdapter.VH> {
         private List<ChannelEntity> data = new ArrayList<>();
+        private final boolean compact;
+        boolean rowMode = false;
+        ChAdapter(boolean compact) { this.compact = compact; }
 
         void set(List<ChannelEntity> l) {
             data = l != null ? l : new ArrayList<>();
@@ -1064,7 +1172,13 @@ public class TvMainActivity extends FragmentActivity {
         }
 
         @NonNull @Override public VH onCreateViewHolder(@NonNull ViewGroup p, int t) {
-            return new VH(LayoutInflater.from(p.getContext()).inflate(R.layout.item_tv_channel, p, false));
+            View v = LayoutInflater.from(p.getContext()).inflate(rowMode ? R.layout.item_tv_chrow : R.layout.item_tv_channel, p, false);
+            if (compact && !rowMode) {
+                ViewGroup.LayoutParams lp = v.getLayoutParams();
+                lp.width = dp(132); lp.height = dp(98);
+                v.setLayoutParams(lp);
+            }
+            return new VH(v);
         }
 
         @Override public void onBindViewHolder(@NonNull VH h, int pos) {

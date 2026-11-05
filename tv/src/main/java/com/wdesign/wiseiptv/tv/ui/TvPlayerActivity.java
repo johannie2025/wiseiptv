@@ -155,6 +155,19 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
     @Override public void onPlaying() { runOnUiThread(() -> { tvStatus.setVisibility(View.GONE); progressBar.setVisibility(View.GONE); }); }
     @Override public void onError(String msg) { runOnUiThread(() -> { tvStatus.setText("⚠ " + msg); tvStatus.setVisibility(View.VISIBLE); progressBar.setVisibility(View.GONE); }); }
 
+    /** Les touches de zapping/qualité sont prises ici, avant la PlayerView (qui les avalait). */
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        int k = event.getKeyCode();
+        boolean mine = k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT
+            || k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
+            || k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_CHANNEL_UP || k == KeyEvent.KEYCODE_CHANNEL_DOWN;
+        if (mine && engine != null) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) return onKeyDown(k, event);
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
     @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (engine == null) return super.onKeyDown(keyCode, event);
         showOsd();
