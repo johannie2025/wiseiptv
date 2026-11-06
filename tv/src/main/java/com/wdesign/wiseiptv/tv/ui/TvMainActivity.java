@@ -244,10 +244,7 @@ public class TvMainActivity extends FragmentActivity {
         rvRow.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
         rvRow.setAdapter(adapterRow);
 
-        View.OnClickListener openSel = v -> { 
-            if (selected != null) openPlayer(selected, previewUrl); 
-        };
-        
+      
         findViewById(R.id.home_hero).setOnClickListener(openSel);
         findViewById(R.id.home_hero).setClipToOutline(true);
         findViewById(R.id.home_hero).setOutlineProvider(new android.view.ViewOutlineProvider() {
