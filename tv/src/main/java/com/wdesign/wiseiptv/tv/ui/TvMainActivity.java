@@ -107,6 +107,9 @@ public class TvMainActivity extends FragmentActivity {
     private ChAdapter adapterGrid, adapterRow;
     private ChannelEntity resumeCh;
     private ChAdapter adapter, adapterSide;
+    private boolean backdropWanted = false, previewPlaying = false;
+    private final Runnable navShowTask2 = () -> { if (pendingNav >= 0 && pendingNav != section) showSection(pendingNav); };
+    private int pendingNav = -1;
     private final View[] navViews = new View[NAV_LABELS.length];
 
 
@@ -169,6 +172,12 @@ public class TvMainActivity extends FragmentActivity {
         rvRow.setAdapter(adapterRow);
         View.OnClickListener openSel = v -> { if (selected != null) openPlayer(selected, previewUrl); };
         findViewById(R.id.home_hero).setOnClickListener(openSel);
+        findViewById(R.id.home_hero).setClipToOutline(true);
+        findViewById(R.id.home_hero).setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 16 * v.getResources().getDisplayMetrics().density);
+            }
+        });
         findViewById(R.id.home_resume).setOnClickListener(v -> { if (resumeCh != null) { select(resumeCh, false); openPlayer(resumeCh, resumeCh.streamUrl); } });
         adapter = new ChAdapter(false);
         adapterSide = new ChAdapter(false);
@@ -217,7 +226,13 @@ public class TvMainActivity extends FragmentActivity {
             ((ImageView) v.findViewById(R.id.nav_icon)).setImageResource(NAV_ICONS[i]);
             ((TextView) v.findViewById(R.id.nav_label)).setText(NAV_LABELS[i]);
             v.setOnClickListener(x -> showSection(idx));
-            v.setOnFocusChangeListener((x, f) -> { if (f) showSection(idx); });
+            v.setOnFocusChangeListener((x, f) -> {
+                if (f) {
+                    pendingNav = idx;
+                    handler.removeCallbacks(navShowTask2);
+                    handler.postDelayed(navShowTask2, 380);   // évite de recharger chaque section en passant dessus
+                } else if (pendingNav == idx) { handler.removeCallbacks(navShowTask2); }
+            });
             navItems.addView(v);
             navViews[i] = v;
         }
@@ -287,6 +302,16 @@ public class TvMainActivity extends FragmentActivity {
         findViewById(R.id.btn_view_list).setAlpha(listMode ? 1f : 0.55f);
     }
 
+    private void wireTopDown() {
+        View target = section == S_HOME ? findViewById(R.id.home_hero) : findViewById(R.id.btn_watch);
+        if (target == null) return;
+        int id = target.getId();
+        int[] ids = {R.id.top_search, R.id.btn_view_grid, R.id.btn_view_list, R.id.home_avatar};
+        for (int i : ids) { View v = findViewById(i); if (v != null) v.setNextFocusDownId(id); }
+        ViewGroup nav = findViewById(R.id.nav_items);
+        for (int i = 0; nav != null && i < nav.getChildCount(); i++) nav.getChildAt(i).setNextFocusDownId(id);
+    }
+
     private void showSection(int s) {
         if (s == S_SEARCH) return;
         if (topSearch != null && searchQuery.length() > 0 && section == S_SEARCH) { handler.removeCallbacks(searchTask); searchQuery = ""; topSearch.setText(""); }
@@ -295,6 +320,7 @@ public class TvMainActivity extends FragmentActivity {
             return;
         }
         section = s;
+        handler.post(this::wireTopDown);
         getSharedPreferences(PREFS_STATE, MODE_PRIVATE).edit().putInt("section", s).apply();
         highlightNav(s);
         detachLiveData();
@@ -332,11 +358,25 @@ public class TvMainActivity extends FragmentActivity {
     private boolean isBrowse(int s) { return s <= S_FAVS; }
 
     /** true : l'aperçu plein écran sert de fond (sections chaînes) ; false : fond du thème (accueil / pages). */
-    private void setBackdrop(boolean on) {
-        int vis = on ? View.VISIBLE : View.GONE;
+    /** Le fond « monde + logo » reste affiché tant qu'aucun flux ne joue ; la vidéo apparaît dès la 1re image. */
+    private void applyBackdrop() {
+        View hp = findViewById(R.id.home_preview);
+        if (hp != null) {
+            hp.setAlpha(previewPlaying ? 1f : 0f);
+            int dv = previewPlaying ? View.GONE : View.VISIBLE;
+            findViewById(R.id.home_default_bg).setVisibility(dv);
+            findViewById(R.id.home_default_logo).setVisibility(dv);
+        }
+        boolean show = backdropWanted && previewPlaying;
+        int vis = show ? View.VISIBLE : View.INVISIBLE;
         findViewById(R.id.preview_card).setVisibility(vis);
         findViewById(R.id.scrim_a).setVisibility(vis);
         findViewById(R.id.scrim_b).setVisibility(vis);
+    }
+
+    private void setBackdrop(boolean on) {
+        backdropWanted = on;
+        applyBackdrop();
         PlayerView target = (section == S_HOME) ? (PlayerView) findViewById(R.id.home_preview)
                                                  : (PlayerView) findViewById(R.id.tv_preview_player);
         if (target != previewView) {
@@ -403,7 +443,8 @@ public class TvMainActivity extends FragmentActivity {
         });
     }
 
-    private void bindHome(List<ChannelEntity> list, boolean recents) {
+    private void bindHome(List<ChannelEntity> rawList, boolean recents) {
+        List<ChannelEntity> list = dedupe(rawList);
         SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_TV);
         boolean empty = list == null || list.isEmpty();
         tvEmpty.setText("Aucune chaîne.\nLa synchronisation est peut-être en cours…");
@@ -426,8 +467,19 @@ public class TvMainActivity extends FragmentActivity {
         select(pick, false);
     }
 
+    /** Même chaîne présente dans plusieurs DNS/playlists : on n'en garde qu'une. */
+    static List<ChannelEntity> dedupe(List<ChannelEntity> in) {
+        if (in == null) return null;
+        java.util.LinkedHashMap<String, ChannelEntity> m = new java.util.LinkedHashMap<>();
+        for (ChannelEntity c : in) {
+            String k = (c.name == null ? "" : c.name.trim().toLowerCase()) + "|" + (c.groupTitle == null ? "" : c.groupTitle.trim().toLowerCase()) + "|" + c.contentType;
+            if (!m.containsKey(k)) m.put(k, c);
+        }
+        return new ArrayList<>(m.values());
+    }
+
     private void setList(List<ChannelEntity> raw) {
-        List<ChannelEntity> list = ParentalControl.filter(this, raw);
+        List<ChannelEntity> list = dedupe(ParentalControl.filter(this, raw));
         adapter.set(list);
         adapterSide.set(list);
         boolean empty = list == null || list.isEmpty();
@@ -492,14 +544,15 @@ public class TvMainActivity extends FragmentActivity {
                     runOnUiThread(() -> previewLoading.setVisibility(b ? View.VISIBLE : View.GONE));
                 }
                 @Override public void onPlaying() {
-                    runOnUiThread(() -> previewLoading.setVisibility(View.GONE));
+                    runOnUiThread(() -> { previewLoading.setVisibility(View.GONE); previewPlaying = true; applyBackdrop(); });
                 }
                 @Override public void onError(String message) {
-                    runOnUiThread(() -> previewLoading.setVisibility(View.GONE));
+                    runOnUiThread(() -> { previewLoading.setVisibility(View.GONE); previewPlaying = false; applyBackdrop(); });
                 }
             });
             previewEngine.attachView(previewView);
             previewEngine.setMuted(false);
+            previewEngine.setQuality(4);      // aperçu : 720p max (fluidité sur boîtiers TV)
         }
         previewEngine.play(url);
     }
@@ -507,6 +560,7 @@ public class TvMainActivity extends FragmentActivity {
     private void stopPreview() {
         handler.removeCallbacks(previewTask);
         if (previewEngine != null) previewEngine.pause();
+        previewPlaying = false; applyBackdrop();
     }
 
     private void loadEpg(final ChannelEntity ch) {
@@ -654,8 +708,13 @@ public class TvMainActivity extends FragmentActivity {
             previewView.setPlayer(null);
             com.wdesign.wiseiptv.core.player.PlayerHandoff.offer(previewEngine, playUrl);
             previewEngine = null;
+            previewPlaying = false;
             startPosition = 0;
-        } else if (previewEngine != null) previewEngine.pause();
+        } else if (previewEngine != null) {
+            previewView.setPlayer(null);
+            previewEngine.release(); previewEngine = null;
+            previewPlaying = false;
+        }
         Intent i = new Intent(this, TvPlayerActivity.class);
         i.putExtra(TvPlayerActivity.EXTRA_ID,    ch.id);
         i.putExtra(TvPlayerActivity.EXTRA_NAME,  ch.name);
@@ -1242,7 +1301,10 @@ public class TvMainActivity extends FragmentActivity {
 
     @Override protected void onPause() {
         handler.removeCallbacks(previewTask);
-        if (previewEngine != null) previewEngine.pause();
+        // Libère la connexion du serveur (1 flux max) pour que le lecteur plein écran démarre toujours
+        if (previewView != null) previewView.setPlayer(null);
+        if (previewEngine != null) { previewEngine.release(); previewEngine = null; }
+        previewPlaying = false; applyBackdrop();
         DataUsage.flush(this);
         super.onPause();
     }
