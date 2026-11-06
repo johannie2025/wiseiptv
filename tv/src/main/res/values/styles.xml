@@ -13,6 +13,9 @@
         <item name="android:alertDialogTheme">@style/Theme.WiseIPTV.Dialog</item>
     </style>
 
+    <!-- Alias de compatibilité avec les manifestes TV -->
+    <style name="Theme.WiseIPTV.TV" parent="Theme.WiseIPTV" />
+
     <style name="Theme.WiseIPTV.Splash" parent="Theme.WiseIPTV">
         <item name="android:windowBackground">@drawable/bg_app_gradient</item>
         <item name="android:windowFullscreen">false</item>
@@ -21,6 +24,8 @@
     <style name="Theme.WiseIPTV.Fullscreen" parent="Theme.WiseIPTV">
         <item name="android:windowBackground">@drawable/bg_app_gradient</item>
     </style>
+
+    <style name="Theme.WiseIPTV.TV.Fullscreen" parent="Theme.WiseIPTV.Fullscreen" />
 
     <style name="Theme.WiseIPTV.Dialog" parent="android:Theme.Material.Dialog.Alert">
         <item name="android:windowBackground">@drawable/bg_card</item>
