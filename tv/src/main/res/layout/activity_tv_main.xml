@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/main_root"
+    android:id="@+id/home_default_bg"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@drawable/bg_app_gradient">
 
@@ -35,7 +35,7 @@
             android:orientation="horizontal" android:gravity="center_vertical"
             android:paddingStart="14dp" android:paddingEnd="18dp"
             android:background="@drawable/scrim_top">
-            <ImageView android:layout_width="44dp" android:layout_height="44dp"
+            <ImageView android:id="@+id/home_default_logo" android:layout_width="44dp" android:layout_height="44dp"
                 android:src="@mipmap/ic_launcher" android:scaleType="fitCenter"
                 android:contentDescription="Wise IPTV"/>
             <TextView android:id="@+id/home_greeting"
