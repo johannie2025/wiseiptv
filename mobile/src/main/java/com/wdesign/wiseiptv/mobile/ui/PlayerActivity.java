@@ -177,6 +177,7 @@ public class PlayerActivity extends AppCompatActivity
 
         // Reprise du flux de l'aperçu de l'accueil : aucun rechargement
         com.wdesign.wiseiptv.core.util.WatchStats.setChannel(channelName);
+        com.wdesign.wiseiptv.core.util.SpeedBadge.attach(this, android.view.Gravity.TOP | android.view.Gravity.END, 10, 44);
         engine = com.wdesign.wiseiptv.core.player.PlayerHandoff.take(streamUrl);
         if (engine != null) {
             engine.setListener(this);

@@ -115,6 +115,7 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        com.wdesign.wiseiptv.core.util.SpeedBadge.attach(this, android.view.Gravity.BOTTOM | android.view.Gravity.END, 12, 84);
         db           = AppDatabase.get(this);
         rvChannels   = findViewById(R.id.rv_channels);
         progressBar  = findViewById(R.id.progress_bar);
@@ -260,13 +261,13 @@ public class MainActivity extends AppCompatActivity implements ChannelAdapter.On
     private void refreshSubscriptionCard() {
         SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_MOBILE);
         if (si == null) {
-            tvGreeting.setText("Bonjour 👋");
+            tvGreeting.setText("Salut 👋");
             tvAvatar.setText("W");
             cardSubscription.setVisibility(View.GONE);
             return;
         }
         String name = si.displayName();
-        tvGreeting.setText(name.isEmpty() ? "Bonjour 👋" : "Bonjour " + name + " 👋");
+        tvGreeting.setText(name.isEmpty() ? "Salut 👋" : "Salut " + name + " 👋");
         tvAvatar.setText(si.initial());
         tvSubExpiry.setText("Expire le : " + si.formattedExpiry());
         boolean soon = si.isExpiringSoon(5);
