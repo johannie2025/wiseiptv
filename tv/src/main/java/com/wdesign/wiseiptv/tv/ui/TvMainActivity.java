@@ -108,8 +108,10 @@ public class TvMainActivity extends FragmentActivity {
     private ChannelEntity resumeCh;
     private ChAdapter adapter, adapterSide;
     private boolean backdropWanted = false, previewPlaying = false;
-    private final Runnable navShowTask2 = () -> { if (pendingNav >= 0 && pendingNav != section) showSection(pendingNav); };
     private int pendingNav = -1;
+    private final Runnable navShowTask2 = new Runnable() {
+        @Override public void run() { if (pendingNav >= 0 && pendingNav != TvMainActivity.this.section) showSection(pendingNav); }
+    };
     private final View[] navViews = new View[NAV_LABELS.length];
 
 
