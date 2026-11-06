@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Android 12+ : le splash système reprend le fond sombre → transition fluide vers notre splash animé -->
-    <style name="Theme.WiseIPTV.Splash" parent="Theme.WiseIPTV">
-        <item name="android:windowBackground">@drawable/bg_app_gradient</item>
-        <item name="android:windowSplashScreenBackground">@color/wise_bg_top</item>
-        <item name="android:windowSplashScreenAnimationDuration">200</item>
-    </style>
-</resources>
