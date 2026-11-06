@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main_root"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        android:stateListAnimator="@null" app:elevation="0dp">
+
+        <!-- En-tête : logo + salutation + grille + avatar -->
+        <LinearLayout android:id="@+id/header_row"
+            android:layout_width="match_parent" android:layout_height="64dp"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:paddingStart="14dp" android:paddingEnd="14dp">
+            <ImageView android:layout_width="44dp" android:layout_height="44dp"
+                android:src="@mipmap/ic_launcher" android:scaleType="fitCenter"
+                android:contentDescription="Wise IPTV"/>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical"
+                android:layout_marginStart="10dp">
+                <TextView android:id="@+id/tv_greeting"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Bonjour 👋" android:textColor="@color/white"
+                    android:textSize="17sp" android:textStyle="bold"
+                    android:maxLines="1" android:ellipsize="end"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Bon visionnage !" android:textColor="@color/text_secondary"
+                    android:textSize="12sp"/>
+            </LinearLayout>
+            <ImageButton android:id="@+id/btn_grid"
+                android:layout_width="44dp" android:layout_height="44dp"
+                android:src="@drawable/ic_grid" android:padding="11dp"
+                android:contentDescription="Disposition de la grille"
+                android:background="?selectableItemBackgroundBorderless"
+                android:tint="@color/white"/>
+            <TextView android:id="@+id/tv_avatar"
+                android:layout_width="38dp" android:layout_height="38dp"
+                android:layout_marginStart="6dp" android:gravity="center"
+                android:background="@drawable/bg_avatar" android:text="W"
+                android:textColor="@color/white" android:textStyle="bold" android:textSize="16sp"/>
+        </LinearLayout>
+
+        <!-- Carte abonnement -->
+        <LinearLayout android:id="@+id/card_subscription"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:background="@drawable/bg_card_hero"
+            android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
+            android:layout_marginBottom="8dp" android:padding="12dp"
+            android:visibility="gone">
+            <ImageView android:layout_width="30dp" android:layout_height="30dp"
+                android:src="@drawable/ic_check_circle" android:tint="@color/wise_green"
+                android:contentDescription="@null"/>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical"
+                android:layout_marginStart="12dp">
+                <TextView android:id="@+id/tv_sub_title"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:text="Abonnement Actif" android:textColor="@color/white"
+                    android:textSize="15sp" android:textStyle="bold"/>
+                <TextView android:id="@+id/tv_sub_expiry"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:textColor="#C9D8F2" android:textSize="12sp"/>
+            </LinearLayout>
+            <TextView android:id="@+id/tv_sub_days"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:background="@drawable/bg_badge_gold" android:textColor="#1A1A1A"
+                android:textSize="12sp" android:textStyle="bold"
+                android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:paddingTop="4dp" android:paddingBottom="4dp"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/tv_sync_status"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:paddingStart="16dp" android:paddingEnd="16dp"
+            android:paddingTop="2dp" android:paddingBottom="4dp"
+            android:textColor="@color/wise_blue_light" android:textSize="12sp"
+            android:visibility="gone"/>
+
+        <SearchView android:id="@+id/search_view"
+            android:layout_width="match_parent" android:layout_height="46dp"
+            android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
+            android:background="@drawable/bg_search"
+            android:queryHint="Rechercher une chaîne, un film, une série…"
+            android:iconifiedByDefault="false"/>
+
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/tab_layout"
+            android:layout_width="match_parent" android:layout_height="52dp"
+            android:background="@android:color/transparent"
+            android:paddingStart="8dp" android:paddingEnd="8dp"
+            app:tabTextColor="@color/text_secondary"
+            app:tabSelectedTextColor="@color/white"
+            app:tabIndicatorHeight="0dp"
+            app:tabBackground="@drawable/bg_tab_chip"
+            app:tabRippleColor="@android:color/transparent"
+            app:tabPaddingStart="14dp" app:tabPaddingEnd="14dp"
+            app:tabMinWidth="0dp"
+            app:tabMode="scrollable"/>
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <FrameLayout android:layout_width="match_parent" android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- ACCUEIL : héros + bouton Regarder + slide des chaînes -->
+        <ScrollView android:id="@+id/home_panel"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:scrollbars="none" android:clipToPadding="false" android:paddingBottom="76dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <FrameLayout android:id="@+id/home_hero"
+                    android:layout_width="match_parent" android:layout_height="200dp"
+                    android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
+                    android:background="@drawable/bg_hero" android:clipToOutline="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:clickable="true" android:focusable="true">
+                    <ImageView android:id="@+id/hero_logo"
+                        android:layout_width="match_parent" android:layout_height="match_parent"
+                        android:padding="48dp" android:scaleType="fitCenter"
+                        android:contentDescription="@null"/>
+                    <androidx.media3.ui.PlayerView android:id="@+id/hero_preview"
+                        android:layout_width="match_parent" android:layout_height="match_parent"
+                        app:use_controller="false" app:resize_mode="zoom"
+                        android:visibility="invisible"/>
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:layout_gravity="bottom" android:orientation="horizontal"
+                        android:gravity="bottom" android:background="@drawable/bg_osd_bar_bottom"
+                        android:paddingStart="14dp" android:paddingEnd="14dp"
+                        android:paddingTop="26dp" android:paddingBottom="12dp">
+                        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1" android:orientation="vertical">
+                            <TextView android:id="@+id/hero_badge"
+                                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                                android:text="EN DIRECT" android:textColor="@color/white"
+                                android:textSize="9sp" android:textStyle="bold"
+                                android:background="@drawable/bg_badge_live"
+                                android:paddingStart="7dp" android:paddingEnd="7dp"
+                                android:paddingTop="2dp" android:paddingBottom="2dp"/>
+                            <TextView android:id="@+id/hero_title"
+                                android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp" android:textColor="@color/white"
+                                android:textSize="18sp" android:textStyle="bold"
+                                android:maxLines="1" android:ellipsize="end"/>
+                            <TextView android:id="@+id/hero_sub"
+                                android:layout_width="match_parent" android:layout_height="wrap_content"
+                                android:textColor="#C9D8F2" android:textSize="12sp"
+                                android:maxLines="1" android:ellipsize="end"/>
+                        </LinearLayout>
+                        <androidx.appcompat.widget.AppCompatButton android:id="@+id/btn_watch"
+                            style="@style/Wise.Button"
+                            android:layout_width="wrap_content" android:layout_height="38dp"
+                            android:layout_marginStart="10dp"
+                            android:paddingStart="18dp" android:paddingEnd="18dp"
+                            android:gravity="center"
+                            android:text="▶  Regarder" android:textSize="13sp"
+                            android:background="@drawable/btn_watch"/>
+                    </LinearLayout>
+                </FrameLayout>
+
+                <LinearLayout android:id="@+id/hero_dots"
+                    android:layout_width="match_parent" android:layout_height="22dp"
+                    android:orientation="horizontal" android:gravity="center"/>
+
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="horizontal" android:gravity="center_vertical"
+                    android:paddingStart="14dp" android:paddingEnd="14dp" android:layout_marginBottom="8dp">
+                    <TextView android:id="@+id/tv_home_section"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="Chaînes populaires"
+                        android:textColor="@color/white" android:textSize="16sp" android:textStyle="bold"/>
+                    <TextView android:id="@+id/btn_see_all"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Voir tout  ›" android:textColor="@color/wise_blue_light"
+                        android:textSize="13sp" android:padding="6dp"/>
+                </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView android:id="@+id/rv_home_slider"
+                    android:layout_width="match_parent" android:layout_height="100dp"
+                    android:orientation="horizontal"
+                    android:paddingStart="14dp" android:paddingEnd="6dp"
+                    android:clipToPadding="false"/>
+            </LinearLayout>
+        </ScrollView>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_channels"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:paddingStart="6dp" android:paddingEnd="6dp"
+            android:paddingTop="6dp" android:paddingBottom="76dp"
+            android:clipToPadding="false" android:visibility="gone"/>
+        <ProgressBar android:id="@+id/progress_bar"
+            android:layout_width="48dp" android:layout_height="48dp"
+            android:layout_gravity="center" android:visibility="gone"/>
+        <TextView android:id="@+id/tv_empty"
+            android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="Aucune chaîne.\nAjoutez une playlist M3U"
+            android:textColor="@color/text_secondary"
+            android:gravity="center" android:visibility="gone"/>
+    </FrameLayout>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_nav"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:background="@color/wise_surface"
+        android:elevation="10dp"
+        app:menu="@menu/bottom_nav_menu"
+        app:labelVisibilityMode="labeled"
+        app:itemIconTint="@color/nav_selector"
+        app:itemTextColor="@color/nav_selector"/>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

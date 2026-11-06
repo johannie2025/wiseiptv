@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/bg_app_gradient">
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scrollbars="none" android:clipToPadding="false" android:paddingBottom="80dp">
+        <LinearLayout android:id="@+id/set_content"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="16dp">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Paramètres" style="@style/Wise.Title"
+                android:layout_marginTop="6dp" android:layout_marginBottom="14dp"/>
+            <include android:id="@+id/row_account" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_appearance" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_language" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_player" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_parental" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_network" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_layout" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_refresh" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_support" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_rate" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <include android:id="@+id/row_about" layout="@layout/row_setting"
+                android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <TextView android:id="@+id/tv_set_footer"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:layout_marginTop="18dp"
+                android:text="W Design — +240 222 886 007"
+                android:textColor="#5C7099" android:textSize="11sp"/>
+        </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_nav"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:background="@color/wise_surface"
+        android:elevation="10dp"
+        app:menu="@menu/bottom_nav_menu" app:labelVisibilityMode="labeled"
+        app:itemIconTint="@color/nav_selector" app:itemTextColor="@color/nav_selector"/>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
