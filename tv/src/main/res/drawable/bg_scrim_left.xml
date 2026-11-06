@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Voile sombre à gauche : le texte du héros reste lisible sur l'aperçu vidéo -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient android:angle="0" android:startColor="#F2040814" android:centerColor="#99040814"
-        android:endColor="#00040814" android:type="linear"/>
-</shape>
