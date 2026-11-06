@@ -60,6 +60,14 @@
         <item name="android:stateListAnimator">@null</item>
     </style>
 
+    <style name="Wise.Button.TV" parent="Widget.AppCompat.Button">
+    <!-- Ajoutez vos attributs personnalisés ici (fond, marges, focus, etc.) -->
+    <item name="android:textColor">@color/white</item>
+    <item name="android:background">@drawable/bg_button_selector</item>
+    <item name="android:focusable">true</item>
+    <item name="android:clickable">true</item>
+</style>
+
     <style name="Wise.Action">
         <item name="android:layout_width">0dp</item>
         <item name="android:layout_height">wrap_content</item>
