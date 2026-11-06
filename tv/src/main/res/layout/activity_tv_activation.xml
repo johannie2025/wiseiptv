@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="horizontal" android:background="@drawable/bg_app_gradient"
+    android:padding="48dp">
+
+    <!-- Colonne gauche : marque + Device Key -->
+    <LinearLayout android:id="@+id/act_left"
+        android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:orientation="vertical"
+        android:gravity="center_vertical" android:paddingEnd="32dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:layout_marginBottom="22dp">
+            <ImageView android:id="@+id/img_logo"
+                android:layout_width="84dp" android:layout_height="84dp"
+                android:src="@mipmap/ic_launcher" android:scaleType="fitCenter"
+                android:contentDescription="Wise IPTV"/>
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:orientation="vertical" android:layout_marginStart="16dp">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Wise IPTV" android:textColor="@color/white"
+                    android:textSize="32sp" android:textStyle="bold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="Activation de votre téléviseur"
+                    android:textColor="@color/text_secondary" android:textSize="15sp"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/card_status"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_card"
+            android:padding="20dp" android:layout_marginBottom="16dp">
+            <TextView android:id="@+id/tv_status"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="⏳ EN ATTENTE" android:textColor="#FFFFEB3B"
+                android:textSize="24sp" android:textStyle="bold" android:layout_marginBottom="6dp"/>
+            <TextView android:id="@+id/tv_status_detail"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Vérification…" android:textColor="@color/text_secondary"
+                android:textSize="15sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:id="@+id/card_key"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_card_hero"
+            android:padding="20dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="🔑 Device Key" android:textColor="@color/white"
+                android:textSize="15sp" android:textStyle="bold" android:layout_marginBottom="10dp"/>
+            <TextView android:id="@+id/tv_device_key"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:background="@drawable/bg_search" android:textColor="@color/wise_blue_light"
+                android:textSize="34sp" android:fontFamily="monospace" android:letterSpacing="0.2"
+                android:textStyle="bold" android:gravity="center"
+                android:paddingTop="14dp" android:paddingBottom="14dp"/>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="Communiquez cette clé à votre revendeur pour activer votre accès."
+                android:textColor="#B8C9E8" android:textSize="13sp" android:layout_marginTop="12dp"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Colonne droite : infos provider + boutons -->
+    <LinearLayout android:id="@+id/act_right"
+        android:layout_width="0dp" android:layout_height="match_parent"
+        android:layout_weight="1" android:orientation="vertical"
+        android:gravity="center_vertical" android:paddingStart="32dp">
+
+        <LinearLayout android:id="@+id/card_provider"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:background="@drawable/bg_card"
+            android:padding="20dp" android:layout_marginBottom="24dp"
+            android:visibility="gone">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="📺 Accès activé" android:textColor="@color/white"
+                android:textSize="18sp" android:textStyle="bold" android:layout_marginBottom="12dp"/>
+            <TextView android:id="@+id/tv_provider_label"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary" android:textSize="14sp"
+                android:layout_marginBottom="6dp"/>
+            <TextView android:id="@+id/tv_login"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/white" android:textSize="15sp" android:layout_marginBottom="6dp"/>
+            <TextView android:id="@+id/tv_password"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/white" android:textSize="15sp" android:layout_marginBottom="6dp"/>
+            <TextView android:id="@+id/tv_expiry"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/wise_blue_light" android:textSize="14sp"/>
+        </LinearLayout>
+
+        <ProgressBar android:id="@+id/progress_bar"
+            android:layout_width="44dp" android:layout_height="44dp"
+            android:layout_gravity="center" android:layout_marginBottom="16dp"
+            android:visibility="gone"/>
+
+        <Button android:id="@+id/btn_check"
+            style="@style/Wise.Button.TV"
+            android:layout_width="match_parent" android:layout_height="60dp"
+            android:text="🔄 Vérifier l'activation"
+            android:background="@drawable/btn_primary"
+            android:focusable="true" android:layout_marginBottom="16dp"/>
+
+        <Button android:id="@+id/btn_access"
+            style="@style/Wise.Button.TV"
+            android:layout_width="match_parent" android:layout_height="60dp"
+            android:text="▶ Accéder au contenu"
+            android:background="@drawable/btn_pink"
+            android:focusable="true" android:visibility="gone"/>
+    </LinearLayout>
+</LinearLayout>
