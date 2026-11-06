@@ -203,15 +203,94 @@ public class TvMainActivity extends FragmentActivity {
         buildNav();
         bindSubscriptionPill();
 
-        btnWatch.setOnClickListener(v -> { if (selected != null) openPlayer(selected, previewUrl); });
+      btnWatch     = findViewById(R.id.btn_watch);
+        btnFav       = findViewById(R.id.btn_fav);
+        btnLive      = findViewById(R.id.btn_live);
+        btnRec       = findViewById(R.id.btn_rec);
+        btnRec.setOnClickListener(v -> toggleRecord());
+        
+        findViewById(R.id.preview_card).setOnClickListener(v -> { 
+            if (selected != null) openPlayer(selected, previewUrl); 
+        });
+        
+        tvListTitle  = findViewById(R.id.tv_list_title);
+        tvInfoName   = findViewById(R.id.tv_info_name);
+        tvInfoGroup  = findViewById(R.id.tv_info_group);
+        tvEpgEmpty   = findViewById(R.id.tv_epg_empty);
+        tvSyncStatus = findViewById(R.id.tv_sync_status);
+        tvEmpty      = findViewById(R.id.tv_empty);
+        tvPreviewLive = findViewById(R.id.tv_preview_live);
+        tvSubPill    = findViewById(R.id.home_status);
+        progressBar  = findViewById(R.id.progress_bar);
+        previewLoading = findViewById(R.id.preview_loading);
+        previewView  = findViewById(R.id.tv_preview_player);
+        rvList       = findViewById(R.id.rv_list);
+        
+        panelHome = findViewById(R.id.panel_home);
+        homeTitle = findViewById(R.id.home_title);
+        homeSub = findViewById(R.id.home_sub);
+        homeStatus = findViewById(R.id.home_status);
+        homeResumeName = findViewById(R.id.home_resume_name);
+        homeResumeSub = findViewById(R.id.home_resume_sub);
+        homeResumeLogo = findViewById(R.id.home_resume_logo);
+        
+        rvGrid = findViewById(R.id.home_grid);
+        rvRow = findViewById(R.id.home_row);
+        adapterGrid = new ChAdapter(true);
+        adapterRow = new ChAdapter(true);
+        
+        rvGrid.setLayoutManager(new androidx.recyclerview.widget.GridLayoutManager(this, 2, RecyclerView.HORIZONTAL, false));
+        rvGrid.setAdapter(adapterGrid);
+        rvRow.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        rvRow.setAdapter(adapterRow);
+
+        View.OnClickListener openSel = v -> { 
+            if (selected != null) openPlayer(selected, previewUrl); 
+        };
+        
+        findViewById(R.id.home_hero).setOnClickListener(openSel);
+        findViewById(R.id.home_hero).setClipToOutline(true);
+        findViewById(R.id.home_hero).setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 16 * v.getResources().getDisplayMetrics().density); 
+            } 
+        });
+        
+        findViewById(R.id.home_resume).setOnClickListener(v -> { 
+            if (resumeCh != null) { 
+                select(resumeCh, false); 
+                openPlayer(resumeCh, resumeCh.streamUrl); 
+            } 
+        });
+
+        adapter = new ChAdapter(false);
+        adapterSide = new ChAdapter(false);
+        adapterSide.rowMode = true;
+        rvSide = findViewById(R.id.rv_side);
+        rvSide.setLayoutManager(new LinearLayoutManager(this));
+        rvSide.setAdapter(adapterSide);
+        
+        listMode = getSharedPreferences(PREFS_STATE, MODE_PRIVATE).getBoolean("view_list", false);
+        applyViewMode();
+        
+        findViewById(R.id.btn_view_grid).setOnClickListener(v -> setListMode(false));
+        findViewById(R.id.btn_view_list).setOnClickListener(v -> setListMode(true));
+        findViewById(R.id.home_avatar).setOnClickListener(v -> showSection(S_ACCOUNT));
+        
+        setupSearchBar();
+        com.wdesign.wiseiptv.core.util.SpeedBadge.attach(this, android.view.Gravity.BOTTOM | android.view.Gravity.END, 14, 10);
+        buildNav();
+        bindSubscriptionPill();
+        
+        btnWatch.setOnClickListener(v -> { 
+            if (selected != null) openPlayer(selected, previewUrl); 
+        });
         btnFav.setOnClickListener(v -> toggleFavorite());
         btnLive.setOnClickListener(v -> backToLive());
-
+        
         Fx.stagger(40, 70, findViewById(R.id.top_bar), findViewById(R.id.nav_rail));
-
-        // Reprise : ouvrir directement le lecteur si l'app a été fermée pendant la lecture
+        
         if (savedInstanceState == null) resumePlayerIfNeeded();
-
         section = getSharedPreferences(PREFS_STATE, MODE_PRIVATE).getInt("section", S_HOME);
         if (section == S_SEARCH) section = S_HOME;
         showSection(section);
