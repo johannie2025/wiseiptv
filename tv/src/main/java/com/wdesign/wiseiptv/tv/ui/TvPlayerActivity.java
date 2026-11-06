@@ -67,6 +67,7 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
         tvQuality.setText("Auto");
 
         com.wdesign.wiseiptv.core.util.WatchStats.setChannel(channelName);
+        com.wdesign.wiseiptv.core.util.SpeedBadge.attach(this, android.view.Gravity.BOTTOM | android.view.Gravity.END, 16, 14);
         engine = com.wdesign.wiseiptv.core.player.PlayerHandoff.take(streamUrl);
         long startPosition = getIntent().getLongExtra(EXTRA_START_POSITION, 0);
         if (engine != null) {            // flux de l'aperçu repris sans rechargement

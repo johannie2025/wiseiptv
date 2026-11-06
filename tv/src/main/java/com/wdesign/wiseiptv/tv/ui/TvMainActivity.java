@@ -182,6 +182,7 @@ public class TvMainActivity extends FragmentActivity {
         findViewById(R.id.btn_view_list).setOnClickListener(v -> setListMode(true));
         findViewById(R.id.home_avatar).setOnClickListener(v -> showSection(S_ACCOUNT));
         setupSearchBar();
+        com.wdesign.wiseiptv.core.util.SpeedBadge.attach(this, android.view.Gravity.BOTTOM | android.view.Gravity.END, 14, 10);
 
         buildNav();
         bindSubscriptionPill();
@@ -276,10 +277,10 @@ public class TvMainActivity extends FragmentActivity {
 
     /** Grille (navigation dans les 4 sens) ou liste. */
     private void applyViewMode() {
-        adapter.rowMode = listMode;
-        rvList.setLayoutManager(listMode ? new LinearLayoutManager(this)
-            : new androidx.recyclerview.widget.GridLayoutManager(this, 4));
-        rvList.setAdapter(adapter);
+        adapterSide.rowMode = listMode;
+        rvSide.setLayoutManager(listMode ? new LinearLayoutManager(this)
+            : new androidx.recyclerview.widget.GridLayoutManager(this, 2));
+        rvSide.setAdapter(adapterSide);
         findViewById(R.id.btn_view_grid).setSelected(!listMode);
         findViewById(R.id.btn_view_list).setSelected(listMode);
         findViewById(R.id.btn_view_grid).setAlpha(listMode ? 0.55f : 1f);
@@ -832,6 +833,11 @@ public class TvMainActivity extends FragmentActivity {
     private void bindSubscriptionPill() {
         SubscriptionInfo si = SubscriptionInfo.read(this, SubscriptionInfo.PREFS_TV);
         if (si == null) { tvSubPill.setVisibility(View.GONE); return; }
+        TextView gr = findViewById(R.id.home_greeting);
+        String nm = si.displayName();
+        if (gr != null) gr.setText(nm.isEmpty() ? "Salut 👋" : "Salut " + nm + " 👋");
+        TextView avt = findViewById(R.id.home_avatar);
+        if (avt != null) avt.setText(si.initial());
         tvSubPill.setVisibility(View.VISIBLE);
         tvSubPill.setText(si.active ? "Premium · " + si.daysLeft + " j" : "Expiré");
         tvSubPill.setBackgroundResource(!si.active || si.isExpiringSoon(5) ? R.drawable.bg_alert : R.drawable.bg_badge_green);
