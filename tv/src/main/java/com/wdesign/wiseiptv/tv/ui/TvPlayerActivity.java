@@ -128,16 +128,19 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
     /** Zapping TV: DPAD_LEFT = précédent, DPAD_RIGHT = suivant */
     private void zapChannel(int dir) {
         Executors.newSingleThreadExecutor().execute(() -> {
-            ChannelEntity target = dir < 0
-                ? db.channelDao().getPrev(sortOrder, contentType, groupTitle)
-                : db.channelDao().getNext(sortOrder, contentType, groupTitle);
+            // Voisine exacte dans la liste affichée ; à défaut, voisine en base (tous groupes confondus)
+            ChannelEntity target = com.wdesign.wiseiptv.tv.util.ZapList.neighbor(channelId, streamUrl, dir);
+            if (target == null) target = dir < 0
+                ? db.channelDao().getPrev(sortOrder, contentType, null)
+                : db.channelDao().getNext(sortOrder, contentType, null);
             if (target == null) return;
+            final ChannelEntity tg = target;
             runOnUiThread(() -> {
-                channelId   = target.id;
-                channelName = target.name;
-                streamUrl   = target.streamUrl;
-                groupTitle  = target.groupTitle;
-                sortOrder   = target.sortOrder;
+                channelId   = tg.id;
+                channelName = tg.name;
+                streamUrl   = tg.streamUrl;
+                groupTitle  = tg.groupTitle;
+                sortOrder   = tg.sortOrder;
                 tvName.setText(channelName);
                 if (tvGroup != null && groupTitle != null) tvGroup.setText(groupTitle);
                 engine.play(streamUrl);
@@ -156,12 +159,36 @@ public class TvPlayerActivity extends FragmentActivity implements PlayerEngine.L
     @Override public void onPlaying() { runOnUiThread(() -> { tvStatus.setVisibility(View.GONE); progressBar.setVisibility(View.GONE); }); }
     @Override public void onError(String msg) { runOnUiThread(() -> { tvStatus.setText("⚠ " + msg); tvStatus.setVisibility(View.VISIBLE); progressBar.setVisibility(View.GONE); }); }
 
+    private boolean centerLong = false;
+
+    private void toggleFavoriteCurrent() {
+        final long id = channelId;
+        Executors.newSingleThreadExecutor().execute(() -> {
+            ChannelEntity c = db.channelDao().findById(id);
+            if (c == null) return;
+            final boolean fav = !c.isFavorite;
+            db.channelDao().setFavorite(id, fav);
+            runOnUiThread(() -> { showOsd(); android.widget.Toast.makeText(this, fav ? "♥ Ajoutée aux favoris" : "♡ Retirée des favoris", android.widget.Toast.LENGTH_SHORT).show(); });
+        });
+    }
+
     /** Les touches de zapping/qualité sont prises ici, avant la PlayerView (qui les avalait). */
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         int k = event.getKeyCode();
         boolean mine = k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT
             || k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
             || k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_CHANNEL_UP || k == KeyEvent.KEYCODE_CHANNEL_DOWN;
+        if (k == KeyEvent.KEYCODE_DPAD_CENTER && engine != null) {
+            // Appui court = lecture/pause ; appui long = favori
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) centerLong = false;
+                else if (!centerLong) { centerLong = true; toggleFavoriteCurrent(); }
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                if (!centerLong) onKeyDown(k, event);
+                centerLong = false;
+            }
+            return true;
+        }
         if (mine && engine != null) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) return onKeyDown(k, event);
             return true;

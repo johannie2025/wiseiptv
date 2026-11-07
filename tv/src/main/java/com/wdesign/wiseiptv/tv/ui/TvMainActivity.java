@@ -698,6 +698,7 @@ public class TvMainActivity extends FragmentActivity {
 
     private void openPlayer(ChannelEntity ch, String url) {
         saveRecent(ch.id);
+        com.wdesign.wiseiptv.tv.util.ZapList.set(adapterSide.items());
         handler.removeCallbacks(previewTask);
         long startPosition = 0;
         if (ch.contentType != ChannelEntity.TYPE_LIVE && previewEngine != null && !replaying
@@ -1233,6 +1234,8 @@ public class TvMainActivity extends FragmentActivity {
         boolean rowMode = false;
         ChAdapter(boolean compact) { this.compact = compact; }
 
+        List<ChannelEntity> items() { return data; }
+
         void set(List<ChannelEntity> l) {
             data = l != null ? l : new ArrayList<>();
             notifyDataSetChanged();
@@ -1262,6 +1265,14 @@ public class TvMainActivity extends FragmentActivity {
             }
             h.itemView.setOnFocusChangeListener((v, f) -> { if (f) select(ch, true); });
             h.itemView.setOnClickListener(v -> { select(ch, false); openPlayer(ch, ch.streamUrl); });
+            // Appui long sur OK : ajoute / retire des favoris
+            h.itemView.setOnLongClickListener(v -> {
+                ch.isFavorite = !ch.isFavorite;
+                bg(() -> db.channelDao().setFavorite(ch.id, ch.isFavorite));
+                if (selected != null && selected.id == ch.id) { selected.isFavorite = ch.isFavorite; updateFavLabel(); }
+                toast(ch.isFavorite ? "♥ " + ch.name + " ajoutée aux favoris" : "♡ " + ch.name + " retirée des favoris");
+                return true;
+            });
         }
 
         @Override public int getItemCount() { return data.size(); }
